@@ -1,0 +1,68 @@
+{
+  "mode": "graph",
+  "inventory": {
+    "root": {
+      "package": "root",
+      "path": "agent.json",
+      "type": "agent"
+    },
+    "packages": {
+      "root": {
+        "origin": {
+          "type": "local"
+        },
+        "files": {
+          "agent.json": {
+            "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+            "type": "agent",
+            "name": "_reviewer",
+            "description": "Review a rendered video",
+            "instructions": "Report every item that fails.",
+            "connectors": {
+              "render-queue": {
+                "source": "./connectors/render-queue"
+              }
+            }
+          },
+          "connectors/render-queue/server.py": "# The render-queue server.\n"
+        },
+        "components": {
+          "connectors/render-queue": {
+            "type": "connector",
+            "dependencies": []
+          }
+        }
+      }
+    }
+  },
+  "lock": {
+    "$schema": "https://oadl.example/schemas/0.4.0/lock.schema.json",
+    "type": "lock",
+    "entries": [
+      {
+        "address": "$",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:f475aca464c0deeb56f5db65fbd66a4644efb37efb53c8635870d4d05c634aad",
+        "dependencies": [
+          "$/connectors/render-queue"
+        ]
+      },
+      {
+        "address": "$/connectors/render-queue",
+        "type": "connector",
+        "source": {
+          "type": "local",
+          "url": "./connectors/render-queue"
+        },
+        "version": "local",
+        "digest": "sha256:c20377b2ad65c234cc194a1f3f5766422afde75f2b96530b69d7f7b412603cb9",
+        "dependencies": []
+      }
+    ]
+  }
+}

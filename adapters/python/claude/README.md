@@ -115,6 +115,14 @@ Configure portable capabilities through the normalized `FabricConfig` fields:
 - `skills.paths` names skill directories that contain `SKILL.md`. The adapter
   stages these directories as a local Claude plugin for the runtime.
 
+An agent package can declare plugins, hooks, and called agents. The loader writes them under three named root keys of the configuration, and the Claude descriptor declares all three under `extension_schemas.agent_config`. A configuration written by hand can set the same keys:
+
+- `nemo_fabric.plugins.v1` holds `paths`, a list of plugin folders. Each folder must hold `.claude-plugin/plugin.json`. The adapter passes each one to Claude Code as a local plugin, after the plugins it stages itself, and approves the `Skill` tool for the skills a plugin carries. Claude Code loads everything the folder holds, including commands, agents, and hooks in Claude's own format that run with the environment of Claude Code, so review a plugin as code.
+- `nemo_fabric.hooks.v1` holds `entries`, a list of hook folders with the `format` of their `hooks.json`. The adapter runs the hooks format of the Agent Plugins 1.1.0 working draft. Each handler runs as a new process from a Claude Agent SDK hook callback, for the events `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, and `Stop`. A handler that fails before a tool call denies the call. A handler's `allow` approves nothing: `permission_mode` and the `tools` policy decide.
+- `nemo_fabric.agents.v1` maps the name of a called agent to its `description`, `instructions`, and optional `max_turns`. Each entry becomes one Claude subagent.
+
+A plugin folder without its manifest, a hook the adapter cannot run as written, and a called agent without instructions fail the start with `claude_invalid_configuration` and name the part. Refer to the [Claude adapter guide](../../../docs/integrations/harness/claude.mdx#run-an-agent-package) for how a handler is started, what it receives, and the limits.
+
 Only Claude-specific controls belong in `harness.settings`:
 
 | Setting | Type | Required | Static default |

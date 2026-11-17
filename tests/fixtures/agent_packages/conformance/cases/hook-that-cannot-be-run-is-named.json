@@ -1,0 +1,18 @@
+{
+  "mode": "compatibility",
+  "documents": [
+    {
+      "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+      "type": "agent",
+      "name": "_reviewer",
+      "description": "Review a rendered video",
+      "instructions": "Report every item that fails.",
+      "hooks": {
+        "tool-guard": {
+          "source": "./hooks/tool-guard"
+        }
+      }
+    }
+  ],
+  "support": {}
+}

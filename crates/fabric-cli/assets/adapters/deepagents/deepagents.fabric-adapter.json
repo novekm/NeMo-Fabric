@@ -241,6 +241,39 @@
     "required": ["kind", "ref"],
     "additionalProperties": false
   },
+  "extension_schemas": {
+    "agent_config": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "nemo_fabric.agents.v1": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z0-9_][a-z0-9_-]*$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Description the main agent uses to select this called agent."
+              },
+              "instructions": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Instructions for the called agent."
+              }
+            },
+            "required": ["description", "instructions"],
+            "additionalProperties": false
+          },
+          "description": "Called agents of an agent package, by name. Each one becomes a declarative subagent."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
   "requirements": {},
   "config_schema": {
     "type": "object",

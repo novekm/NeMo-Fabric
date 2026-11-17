@@ -1,0 +1,117 @@
+{
+  "contract_version": "fabric.adapter/v1alpha2",
+  "adapter_id": "test.fabric.package_parts",
+  "adapter_kind": "python",
+  "extension_schemas": {
+    "agent_config": {
+      "type": "object",
+      "properties": {
+        "nemo_fabric.plugins.v1": {
+          "type": "object",
+          "properties": {
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "paths"
+          ],
+          "additionalProperties": false
+        },
+        "nemo_fabric.hooks.v1": {
+          "type": "object",
+          "properties": {
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "format": {
+                    "enum": [
+                      "https://agent-plugins.org/schemas/1.1.0/hooks.schema.json"
+                    ]
+                  }
+                },
+                "required": [
+                  "path",
+                  "format"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "entries"
+          ],
+          "additionalProperties": false
+        },
+        "nemo_fabric.agents.v1": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string",
+                "minLength": 1
+              },
+              "instructions": {
+                "type": "string",
+                "minLength": 1
+              },
+              "max_turns": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "skills": {
+                "type": "object",
+                "properties": {
+                  "paths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "paths"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "description",
+              "instructions"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "config": {
+    "accepts": [
+      "models",
+      "models.base_url",
+      "models.temperature",
+      "models.max_tokens",
+      "instructions.system",
+      "runtime.max_turns",
+      "mcp",
+      "skills"
+    ],
+    "system_instruction_modes": [
+      "replace",
+      "append"
+    ]
+  }
+}

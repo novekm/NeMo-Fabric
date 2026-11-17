@@ -1,0 +1,9 @@
+{
+  "mode": "document",
+  "document": [
+    {
+      "type": "agent",
+      "name": "example"
+    }
+  ]
+}

@@ -92,9 +92,9 @@ integration shape and implement the minimum lifecycle.
 
 | Agent Harness | Models | Tool Policy | MCP | Skills | Subagents |
 | --- | --- | --- | --- | --- | --- |
-| [Claude](python/claude/README.md) | Native Anthropic or a configured Anthropic Messages-compatible provider | `tools.enabled` selects built-ins; a pre-tool hook enforces enabled and blocked names across built-in, MCP, and plugin tools | Normalized: stdio, HTTP, streamable HTTP, and SSE | Normalized `skills.paths` | Not exposed |
+| [Claude](python/claude/README.md) | Native Anthropic or a configured Anthropic Messages-compatible provider | `tools.enabled` selects built-ins; a pre-tool hook enforces enabled and blocked names across built-in, MCP, and plugin tools | Normalized: stdio, HTTP, streamable HTTP, and SSE | Normalized `skills.paths` | Called agents of an agent package |
 | [Codex](python/codex/README.md) | Native OpenAI or a configured Responses-compatible provider | `tools.enabled` and `tools.blocked` unsupported | Normalized: stdio, HTTP, and streamable HTTP | Normalized `SKILL.md` directories | Not exposed |
-| [LangChain Deep Agents](python/deepagents/README.md) | LangChain model providers | Middleware enforces `tools.enabled` and `tools.blocked` across built-ins, MCP, and local delegation | Normalized through `langchain-mcp-adapters` | Normalized | Built-in, declarative, and Agent Protocol |
+| [LangChain Deep Agents](python/deepagents/README.md) | LangChain model providers | Middleware enforces `tools.enabled` and `tools.blocked` across built-ins, MCP, and local delegation | Normalized through `langchain-mcp-adapters` | Normalized | Built-in, declarative, Agent Protocol, and called agents of an agent package |
 | [Hermes Agent](python/hermes/README.md) | Configurable provider, model, and base URL | `tools.enabled` and `tools.blocked` map to Hermes native toolset selectors | Normalized | Normalized | Not exposed |
 | [mini-SWE-agent](python/mini-swe-agent/README.md) | Configured provider and model | Not exposed | Not exposed | Not exposed | Not exposed |
 | [NOOA](python/nooa/README.md) | Configured provider and model with optional base URL and temperature | Not exposed | InteractiveAgent: normalized whole servers; BenchAgent: not exposed | InteractiveAgent: normalized `skills.paths`; BenchAgent: not exposed | Not exposed |
@@ -126,6 +126,17 @@ routing. `harness_native` assigns a capability to the selected adapter,
 `fabric_managed` assigns it to NeMo Fabric, and `unsupported` means neither can
 execute it. Scalar fields are validated separately against
 `adapter_descriptor.config.accepts`.
+
+### Agent Package Plugins, Hooks, and Called Agents
+
+An agent package can declare plugins, hooks, and called agents. NeMo Fabric has no typed configuration field for them, so the loader writes each kind under a named root key of the configuration. An adapter takes a kind by declaring its key under `extension_schemas.agent_config` in its descriptor. The following table lists the adapters that declare a key:
+
+| Agent Harness | `nemo_fabric.plugins.v1` | `nemo_fabric.hooks.v1` | `nemo_fabric.agents.v1` |
+| --- | --- | --- | --- |
+| [Claude](python/claude/README.md) | Local Claude plugin folders | Hook folders in the Agent Plugins 1.1.0 hooks format | `description`, `instructions`, and `max_turns` |
+| [LangChain Deep Agents](python/deepagents/README.md) | Not declared | Not declared | `description` and `instructions` |
+
+No other adapter declares a key. On those adapters the loader reports each plugin, hook, and called agent by name as not mapped, and planning rejects a configuration that sets a key. Refer to [Agent Packages](../docs/sdk/agent-packages.mdx) for what the loader writes and reports.
 
 ### Environment Values And Names
 
@@ -174,6 +185,8 @@ and additive extension maps because their support does not vary by adapter:
 | `telemetry.providers.<provider>.config` | Declared-provider pass-through | Declared-provider pass-through | Declared-provider pass-through | Declared-provider pass-through | Declared-provider pass-through | Declared-provider pass-through | No | No | No | No | No | Declared-provider pass-through | No | No | No | No | No |
 | `relay.project`, `.output_dir`, `.observability` | Yes | Yes | Yes | Yes | Yes | Yes | No | No | No | No | No | Yes | No | No | No | No | Uses the named external collector sink when selected; config is not sent to the remote service |
 | `relay.components`, `.policy` | Yes | Yes | Yes | Yes | Yes | Yes | No | No | No | No | No | Yes | No | No | No | No | Not sent to the remote service |
+| Root keys `nemo_fabric.plugins.v1`, `nemo_fabric.hooks.v1` | Yes | No | No | No | No | No | No | No | No | No | No | No | No | No | No | No | No |
+| Root key `nemo_fabric.agents.v1` | Yes | No | Yes | No | No | No | No | No | No | No | No | No | No | No | No | No | No |
 | Other additive `extensions` on typed config objects | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor | Rejected unless declared by the descriptor |
 
 The selected model role is `default`, or the sole configured role when no

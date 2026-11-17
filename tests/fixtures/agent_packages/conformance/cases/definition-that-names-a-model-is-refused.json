@@ -1,0 +1,65 @@
+{
+  "mode": "definition",
+  "definition": {
+    "$schema": "https://oadl.example/schemas/0.4.0/agent-definition.schema.json",
+    "type": "agent-definition",
+    "name": "ada-launch-video",
+    "agent": {
+      "source": "./agent.json"
+    },
+    "variables": {
+      "job": "Make the launch video."
+    },
+    "model": {
+      "source": "ollama::llama3.2:1b"
+    }
+  },
+  "agent": {
+    "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+    "type": "agent",
+    "name": "media-desk",
+    "description": "The media team's agent for video work.",
+    "instructions": {
+      "var": "job"
+    },
+    "model": {
+      "source": {
+        "var": "model"
+      }
+    },
+    "limits": {
+      "max_turns": 40,
+      "max_total_tokens": 600000
+    },
+    "variables": {
+      "job": {
+        "type": "string"
+      },
+      "model": {
+        "type": "string",
+        "default": "ollama::llama3.2:3b"
+      }
+    },
+    "skills": {
+      "review": {
+        "source": "./skills/review"
+      },
+      "brand-kit": {
+        "source": "git::https://git.example.com/media-team/agent-parts.git//skills/brand-kit",
+        "version": "~> 1.3"
+      }
+    },
+    "connectors": {
+      "asset-library": {
+        "source": "mcp::https://mcp.example.com/asset-library",
+        "version": "2.3.0"
+      }
+    },
+    "tools": [
+      {
+        "connector": "asset-library",
+        "tool": "find_asset"
+      }
+    ]
+  }
+}

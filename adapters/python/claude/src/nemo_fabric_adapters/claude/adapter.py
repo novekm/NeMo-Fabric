@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 from typing import get_args
 
+from claude_agent_sdk import AgentDefinition
 from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk import ClaudeSDKClient
 from claude_agent_sdk import ClaudeSDKError
@@ -45,6 +46,7 @@ from nemo_fabric_adapter_contract.models import AgentRunResult
 from nemo_fabric_adapter_contract.models import AgentRunStatus
 from nemo_fabric_adapter_contract.models import AgentUsage
 from nemo_fabric_adapter_contract.models import RuntimeContext
+from nemo_fabric_adapters.claude import package_hooks
 from nemo_fabric_adapters.common import instructions as common_instructions
 from nemo_fabric_adapters.common import health as health_transport
 from nemo_fabric_adapters.common import lifecycle
@@ -533,6 +535,44 @@ def _stage_skill_plugin(
     return [{"type": "local", "path": str(plugin_root)}]
 
 
+_PLUGINS_KEY = "nemo_fabric.plugins.v1"
+
+
+def _extension(config: AgentConfig, key: str) -> dict[str, Any]:
+    value = config.extensions.get(key, {})
+    if not isinstance(value, dict):
+        raise AdapterConfigError(
+            "claude_invalid_configuration", f"{key} must be an object"
+        )
+    return value
+
+
+def _package_plugins(config: AgentConfig, base_dir: str) -> list[dict[str, str]]:
+    """Return the plugin folders an agent package declares as local Claude plugins.
+
+    Each folder must hold the manifest Claude Code reads,
+    ``.claude-plugin/plugin.json``.
+    """
+
+    paths = _string_list(
+        _extension(config, _PLUGINS_KEY).get("paths"), name=f"{_PLUGINS_KEY}.paths"
+    )
+    plugins: list[dict[str, str]] = []
+    for value in paths:
+        plugin_path = _resolve_path(base_dir, value)
+        if (
+            not plugin_path.is_dir()
+            or not (plugin_path / ".claude-plugin" / "plugin.json").is_file()
+        ):
+            raise AdapterConfigError(
+                "claude_invalid_configuration",
+                f"{_PLUGINS_KEY} path must be a directory containing "
+                f".claude-plugin/plugin.json: {plugin_path}",
+            )
+        plugins.append({"type": "local", "path": str(plugin_path)})
+    return plugins
+
+
 def _stage_relay_plugin(plugin_path: Path, executable: Path) -> None:
     if plugin_path.exists():
         shutil.rmtree(plugin_path)
@@ -753,6 +793,71 @@ def tool_policy_hooks(config: AgentConfig) -> dict[str, list[HookMatcher]] | Non
     return {"PreToolUse": [HookMatcher(hooks=[enforce_policy])]}
 
 
+_HOOKS_KEY = "nemo_fabric.hooks.v1"
+
+
+def _hooks(
+    config: AgentConfig, runtime_context: RuntimeContext, base_dir: str
+) -> dict[str, list[HookMatcher]] | None:
+    """Join the tools policy hook with the hooks an agent package declares."""
+
+    hooks = tool_policy_hooks(config) or {}
+    try:
+        declared = package_hooks.package_hook_matchers(
+            _extension(config, _HOOKS_KEY).get("entries", []),
+            base_dir=base_dir,
+            data_root=_artifact_root(runtime_context, base_dir)
+            / ".fabric"
+            / "claude"
+            / "hooks",
+        )
+    except ValueError as error:
+        raise AdapterConfigError("claude_invalid_configuration", str(error)) from error
+    for event, matchers in declared.items():
+        hooks.setdefault(event, []).extend(matchers)
+    return hooks or None
+
+
+_AGENTS_KEY = "nemo_fabric.agents.v1"
+
+
+def _package_agents(config: AgentConfig) -> dict[str, AgentDefinition] | None:
+    """Return the called agents an agent package declares as Claude subagents."""
+
+    agents: dict[str, AgentDefinition] = {}
+    for name, entry in _extension(config, _AGENTS_KEY).items():
+        if not name:
+            raise AdapterConfigError(
+                "claude_invalid_configuration",
+                f"{_AGENTS_KEY} has a called agent without a name",
+            )
+        if not isinstance(entry, dict) or any(
+            not isinstance(entry.get(member), str) or not entry[member]
+            for member in ("description", "instructions")
+        ):
+            raise AdapterConfigError(
+                "claude_invalid_configuration",
+                f"{_AGENTS_KEY}.{name} needs a description and instructions",
+            )
+        max_turns = entry.get("max_turns")
+        if max_turns is not None and (
+            isinstance(max_turns, bool)
+            or not isinstance(max_turns, (int, float))
+            or max_turns < 1
+            or max_turns % 1
+        ):
+            raise AdapterConfigError(
+                "claude_invalid_configuration",
+                f"{_AGENTS_KEY}.{name}.max_turns must be a whole number of at least 1",
+            )
+        agents[name] = AgentDefinition(
+            description=entry["description"],
+            prompt=entry["instructions"],
+            maxTurns=None if max_turns is None else int(max_turns),
+        )
+    return agents or None
+
+
 def build_options(
     config: AgentConfig,
     runtime_context: RuntimeContext,
@@ -806,10 +911,14 @@ def build_options(
         if permission_mode == "dontAsk" and enabled_tools is not None
         else []
     )
+    package_plugins = _package_plugins(config, base_dir)
+    agents = _package_agents(config)
+    hooks = _hooks(config, runtime_context, base_dir)
     plugins = _stage_skill_plugin(config, runtime_context, base_dir)
     has_skill_plugin = bool(plugins)
     if relay is not None:
         plugins.append({"type": "local", "path": str(relay.plugin_path)})
+    plugins.extend(package_plugins)
 
     environment = child_environment(
         model,
@@ -827,7 +936,8 @@ def build_options(
             tools=enabled_tools,
             allowed_tools=allowed_tools,
             disallowed_tools=config.tools.blocked if config.tools is not None else [],
-            hooks=tool_policy_hooks(config),
+            hooks=hooks,
+            agents=agents,
             permission_mode=permission_mode,
             max_turns=max_turns,
             max_budget_usd=max_budget,
@@ -837,7 +947,8 @@ def build_options(
             cli_path=_resolve_path(base_dir, cli_path) if cli_path else None,
             mcp_servers=mcp.config_path if mcp is not None else {},
             strict_mcp_config=True,
-            skills="all" if has_skill_plugin else None,
+            # A package plugin can carry skills, like the staged skills plugin.
+            skills="all" if has_skill_plugin or package_plugins else None,
             plugins=plugins,
             env=environment,
             stderr=discard_stderr,

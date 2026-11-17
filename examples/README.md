@@ -94,6 +94,10 @@ The walkthroughs include:
 Start with the shared setup and execution model in the
 [Harbor guide](harbor/README.md).
 
+## Agent Package
+
+[`agent_package`](agent_package/README.md) loads an agent package with `load_agent_package` and prints the load report. The package holds an agent, its lock, one skill, one connector carried in the package, and a definition that adds a skill and lowers a limit. It needs no model endpoint and no network.
+
 ## Native System Stats
 
 [`system_stats`](system_stats/README.md) demonstrates a real temporary worker-memory spike, native sampled peak/mean/range, retained per-invocation artifacts, and Linux cgroup constraints without a model endpoint or Relay collector.

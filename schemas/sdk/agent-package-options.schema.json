@@ -1,0 +1,326 @@
+{
+  "$defs": {
+    "InstructionMode": {
+      "description": "How an instruction value is applied to the selected harness.",
+      "oneOf": [
+        {
+          "const": "replace",
+          "description": "Replace the harness default instruction value.",
+          "type": "string"
+        },
+        {
+          "const": "append",
+          "description": "Preserve the harness default and append this instruction after it.",
+          "type": "string"
+        }
+      ]
+    },
+    "PackageAction": {
+      "description": "What a load does about a required thing that is not met or not checked.",
+      "oneOf": [
+        {
+          "const": "stop",
+          "description": "Stop the load.",
+          "type": "string"
+        },
+        {
+          "const": "warn",
+          "description": "Report it and continue.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What the caller chooses for one agent package load.\n\nEvery member may be left out. The package has no field for any of these:\nthey belong to whoever starts the agent.",
+  "properties": {
+    "bindings": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Targets of the caller's own for custom tools and called agents the\npackage declares, by the place of the declared thing.\n\nA key is `custom_tools.<name>` or `agents.<name>` for the agent that\nruns. For a thing a called agent declares, the same follows the called\nagent's key: `agents.<name>.custom_tools.<tool>`. A value is one line\nof text that names the caller's target, for example a Python reference\nor a registered name. The loader never imports, resolves or runs it.\nA key and a value each hold at most 1024 bytes and no control,\nseparator or hidden format character.\n\nA bound thing has status `bound` in the report and does not stop the\nload. A key that names nothing the package declares is refused. A\nbinding changes nothing else: no need, no pin, no schema finding and\nno other declared thing. Everything else a bound called agent declares\nkeeps a line of its own in the report, and no binding accounts for it.",
+      "type": "object"
+    },
+    "check_machine": {
+      "default": false,
+      "description": "Probe this machine for runtime facts. Default false. The probe does\nnot look for installed software packages.",
+      "type": "boolean"
+    },
+    "entry": {
+      "description": "The entry document, as a path inside the package, when it is not at the root\n(for example a definition kept at `variants/short/agent-definition.json`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expected_lock_sha256": {
+      "description": "The sha256 the caller holds for the lock file, as 64 lowercase hex\ncharacters, with or without `sha256:` before them. The load is refused\nwhen the lock file in the package has another digest.\n\nThe lock sits in the folder it describes. Without this value the check\nshows that the parts match that lock, and no more.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "facts": {
+      "additionalProperties": false,
+      "description": "Facts the caller knows about the place the agent runs. They win over\nprobed facts, key by key. The `packages` fact lists the installed\nsoftware packages by registry.",
+      "properties": {
+        "cpus": {
+          "description": "Processors the agent can use.",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "gpus": {
+          "description": "The GPUs on the machine, one entry for each.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "family": {
+                "type": "string"
+              },
+              "interface": {
+                "additionalProperties": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "compute_capability": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "description": "The interfaces the GPU offers, by name, for example `cuda`.",
+                "type": "object"
+              },
+              "memory": {
+                "description": "A size, such as `24gb`.",
+                "pattern": "^(?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(?:kb|mb|gb|tb)$",
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "harness": {
+          "description": "The name this harness goes by. Left out: the selected adapter's id.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "harness_aliases": {
+          "description": "Other names of this harness. The loader adds the names of the selected adapter.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "known": {
+          "additionalProperties": false,
+          "description": "Names this platform knows. A need on a name that is not known is could not be checked, never not met.",
+          "properties": {
+            "capabilities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "families": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "harnesses": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "interfaces": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "memory": {
+          "description": "Memory the agent can use: a number and a lower-case unit, such as `64gb`.",
+          "pattern": "^(?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(?:kb|mb|gb|tb)$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "additionalProperties": false,
+          "description": "The model that runs.",
+          "properties": {
+            "capabilities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "context_tokens": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "parameters_applied": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "network": {
+          "description": "The network reach the agent is allowed.",
+          "enum": [
+            "none",
+            "internal",
+            "external",
+            null
+          ]
+        },
+        "packages": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": "object"
+          },
+          "description": "The installed software packages, by registry and then by name, with the registry named as a lock names it, such as `pypi` or `npm`. A registry lists every package installed from it with its version. A package left out is not installed. Null means the package is installed and its version is not known. A registry left out was not looked at.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "remote_gpus": {
+          "description": "The GPUs reached through a connector, one entry for each.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "connector": {
+                "description": "The connector the GPU is reached through.",
+                "type": "string"
+              },
+              "family": {
+                "type": "string"
+              },
+              "interface": {
+                "additionalProperties": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "compute_capability": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "description": "The interfaces the GPU offers, by name, for example `cuda`.",
+                "type": "object"
+              },
+              "memory": {
+                "description": "A size, such as `24gb`.",
+                "pattern": "^(?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(?:kb|mb|gb|tb)$",
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "software": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": "Every program on the machine with its version, by name. A program left out is not on the machine. Null means the program is there and its version is not known.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "storage": {
+          "description": "Free storage the agent can use, as a size.",
+          "pattern": "^(?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(?:kb|mb|gb|tb)$",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "if_unsupported": {
+      "$ref": "#/$defs/PackageAction",
+      "default": "stop",
+      "description": "What to do about a required thing whose status is `not_mapped` or\n`not_met`. Default `stop`."
+    },
+    "if_unverified": {
+      "$ref": "#/$defs/PackageAction",
+      "default": "warn",
+      "description": "What to do about a required thing whose status is\n`could_not_be_checked`. Default `warn`."
+    },
+    "instruction_mode": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InstructionMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "How the instruction text is applied. Left out: replace when the adapter\noffers it, else append."
+    },
+    "variables": {
+      "additionalProperties": true,
+      "description": "Values from whoever starts the agent, by variable name.",
+      "type": "object"
+    }
+  },
+  "title": "AgentPackageOptions",
+  "type": "object"
+}

@@ -13,7 +13,8 @@ repos:
         entry: python3 scripts/lint/check_copyright.py
         language: system
         files: '\.(rs|py|pyi|toml|yaml|yml|md|mdx|sh|mjs|ts)$|\.gitignore$'
-        exclude: '(/SKILL\.md|node_modules/|target/|\.venv/|^\.github/pull_request_template\.md)$'
+        # The example agent package pins every file by digest, so a rewritten header would break its lock.
+        exclude: '(/SKILL\.md|node_modules/|target/|\.venv/|^\.github/pull_request_template\.md|^examples/agent_package/release-notes-agent/.*)$'
 
   # Python lint — enforce the flake8-bugbear cached-instance-method rule (B019)
   - repo: https://github.com/astral-sh/ruff-pre-commit

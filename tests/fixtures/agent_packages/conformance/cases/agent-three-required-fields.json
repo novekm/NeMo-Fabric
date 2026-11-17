@@ -1,0 +1,8 @@
+{
+  "mode": "document",
+  "document": {
+    "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+    "type": "agent",
+    "name": "example"
+  }
+}

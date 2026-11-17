@@ -35,6 +35,7 @@ runtime or bindings.
   Keep startup validation rules shared and preserve malformed-input errors.
   Inspection and planning share Relay ATIF admission: requested output requires
   descriptor support and exactly one observability component.
+- Agent packages load through `load_agent_package` in `nemo_fabric_core::agent_package`, the `nemo_fabric.agent_package` module, and `fabric-agent-ctl start --package`. `Fabric.start_agent_package` is `load_agent_package` followed by `start_runtime`. Fetching is a step of its own: `fetch_agent_package` and `fetch_agent_package_from_git`. Keep the Rust options and report types, the four `sdk/agent-package-*` schemas, the Python functions and report classes, and `docs/sdk/agent-packages.mdx` in parity. The load fetches nothing and adds no `FabricConfig` field, and a field it cannot map stays a line in the report. Refusal codes are stable: add a code instead of changing what one means. The guide has the rules for models, skills, bindings and the root extension keys. After a change, run the case runner in `crates/fabric-core/src/agent_package/conformance.rs` and `tests/examples/test_agent_package_example.py`.
 - Update docs and examples in the same branch
 
 ## Minimum Acceptance

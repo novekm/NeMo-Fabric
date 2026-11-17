@@ -12,6 +12,7 @@ SPDX-License-Identifier: Apache-2.0 -->
 
 - [`nemo_fabric.client`](./nemo_fabric.client.md#module-nemo_fabricclient): Native Python client for resolving and running NVIDIA NeMo Fabric agents.
 - [`nemo_fabric.capabilities`](./nemo_fabric.capabilities.md#module-nemo_fabriccapabilities): Metadata-only adapter inspection for host-side admission.
+- [`nemo_fabric.agent_package`](./nemo_fabric.agent_package.md#module-nemo_fabricagent_package): Load an agent package: a folder with an agent document, its lock and its parts.
 - [`nemo_fabric.check`](./nemo_fabric.check.md#module-nemo_fabriccheck): Health requests and immutable health reports.
 - [`nemo_fabric.runtime`](./nemo_fabric.runtime.md#module-nemo_fabricruntime): Runtime lifecycle support for the NVIDIA NeMo Fabric Python SDK.
 - [`nemo_fabric.service`](./nemo_fabric.service.md#module-nemo_fabricservice): Long-lived service lifecycle support for the NeMo Fabric Python SDK.
@@ -27,6 +28,10 @@ SPDX-License-Identifier: Apache-2.0 -->
 - [`capabilities.AdapterCapabilityProfile`](./nemo_fabric.capabilities.md#class-adaptercapabilityprofile): Declared runtime support, not observed execution provenance.
 - [`capabilities.AdapterCompatibilityIssue`](./nemo_fabric.capabilities.md#class-adaptercompatibilityissue): A value-free incompatibility at a NeMo Fabric configuration field.
 - [`capabilities.AdapterInspection`](./nemo_fabric.capabilities.md#class-adapterinspection): Metadata compatibility report; a profile is available only without issues.
+- [`agent_package.AgentPackageDeclaredItem`](./nemo_fabric.agent_package.md#class-agentpackagedeclareditem): One thing a document declares, and what the load did with it.
+- [`agent_package.AgentPackageDigestCheck`](./nemo_fabric.agent_package.md#class-agentpackagedigestcheck): One lock entry and what the load checked about it.
+- [`agent_package.AgentPackageFetchReport`](./nemo_fabric.agent_package.md#class-agentpackagefetchreport): What one agent package fetch placed and what it left.
+- [`agent_package.AgentPackageReport`](./nemo_fabric.agent_package.md#class-agentpackagereport): What one agent package load read, checked and mapped.
 - [`check.CheckReport`](./nemo_fabric.check.md#class-checkreport): Immutable health check report.
 - [`check.CheckRequest`](./nemo_fabric.check.md#class-checkrequest): Select server, runtime, or registered service health.
 - [`runtime.Runtime`](./nemo_fabric.runtime.md#class-runtime): One logical, stateful harness execution.
@@ -118,6 +123,9 @@ SPDX-License-Identifier: Apache-2.0 -->
 ## Functions
 
 - [`capabilities.inspect_adapter`](./nemo_fabric.capabilities.md#function-inspect_adapter): Inspect supplied adapter and optional workflow metadata without loading its SDK.
+- [`agent_package.fetch_agent_package`](./nemo_fabric.agent_package.md#function-fetch_agent_package): Fetch the content the lock of an agent package pins.
+- [`agent_package.fetch_agent_package_from_git`](./nemo_fabric.agent_package.md#function-fetch_agent_package_from_git): Fetch an agent package that is a folder in a git repository.
+- [`agent_package.load_agent_package`](./nemo_fabric.agent_package.md#function-load_agent_package): Read, check and map one agent package. Fetches nothing.
 
 
 ---

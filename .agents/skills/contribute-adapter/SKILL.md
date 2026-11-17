@@ -55,6 +55,8 @@ Follow these repository-specific requirements after applying the public skill:
 
 Use descriptor `config_schema` for static requirements across normalized configuration blocks, and test both execution planning and metadata-only admission without harness SDK imports. Keep native catalog membership and installed-provider availability checks at startup.
 
+To take the plugins, hooks or called agents of an agent package, declare the root key (`nemo_fabric.plugins.v1`, `nemo_fabric.hooks.v1`, `nemo_fabric.agents.v1`) under `extension_schemas.agent_config.properties` with a closed schema that lists only what the adapter runs, and read the key from `config.extensions`. Do not make a root key required: the loader checks the whole set of root keys. Test the descriptor, planning with the key, and the adapter's use of it, as `tests/adapters/test_claude_agent_package.py` does.
+
 Keep descriptor claims, implementation, focused tests, public documentation,
 catalog entries, and packaged metadata synchronized. Start with the narrowest
 truthful capability set.

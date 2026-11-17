@@ -1,0 +1,68 @@
+{
+  "$schema": "https://oadl.example/schemas/0.4.0/lock.schema.json",
+  "type": "lock",
+  "generator": "nemo-fabric-examples",
+  "entries": [
+    {
+      "address": "$",
+      "type": "agent-definition",
+      "source": {
+        "type": "local",
+        "url": "./agent-definition.json"
+      },
+      "version": "local",
+      "digest": "sha256:1300dba47f14ab3f371ba315aef537abe3969d6ba4149f23d9446d9974e1120e",
+      "dependencies": [
+        "$/agent",
+        "$/skills/short-form"
+      ]
+    },
+    {
+      "address": "$/agent",
+      "type": "agent",
+      "source": {
+        "type": "local",
+        "url": "./../../agent.json"
+      },
+      "version": "local",
+      "digest": "sha256:03ea3167fcd2a6ebe9ca091bf6976a3cd2c433d5559b36e28eb342c0b8d8b21e",
+      "dependencies": [
+        "$/agent/connectors/changelog",
+        "$/agent/skills/release-notes"
+      ]
+    },
+    {
+      "address": "$/agent/connectors/changelog",
+      "type": "connector",
+      "source": {
+        "type": "local",
+        "url": "./../../connectors/changelog"
+      },
+      "version": "local",
+      "digest": "sha256:46d4fc7e05ba55c836dbf121149cf4f1d51182ad6ad0cc96449708deb59abe94",
+      "dependencies": []
+    },
+    {
+      "address": "$/agent/skills/release-notes",
+      "type": "skill",
+      "source": {
+        "type": "local",
+        "url": "./../../skills/release-notes"
+      },
+      "version": "local",
+      "digest": "sha256:3a4ca8bf2c57775086c62305d78266bdb11c18aff6d5d9979aeeaa6983e2bf46",
+      "dependencies": []
+    },
+    {
+      "address": "$/skills/short-form",
+      "type": "skill",
+      "source": {
+        "type": "local",
+        "url": "./skills/short-form"
+      },
+      "version": "local",
+      "digest": "sha256:2fdebfed8829ce47467b14fc5cc551d23ab19823b34296ac2b28e2c350f8532e",
+      "dependencies": []
+    }
+  ]
+}

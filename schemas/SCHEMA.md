@@ -149,6 +149,10 @@ These additions require matching core, SDK, and adapter-contract versions.
 - `sdk/fabric-event`: NeMo Fabric lifecycle or progress event.
 - `sdk/runtime-resource-snapshot`: timestamped memory, process count, and CPU
   time of a runtime's local adapter host and its descendants.
+- `sdk/agent-package-report`: load report of an agent package, `fabric.agent_package_report/v1alpha1`. It holds the documents and lock that were read, every lock entry with its digest and what was checked, every declared thing with its status, the selected adapter with the root extension keys its descriptor declares, the configured model and who chose it, and the mapped `FabricConfig` when the outcome is `ready`. The report file that `fabric-agent-ctl start --package` writes follows this schema, without the `config` member. The file it writes for a refused package does not: that file has the version `fabric.agent_package_refusal/v1alpha1` and holds `outcome: refused` and an `error` object with `code`, `subject` and `message`.
+- `sdk/agent-package-options`: caller options of an agent package load: the entry document, variable values, the instruction mode, the `if_unsupported` and `if_unverified` settings, machine probing, caller facts, the lock digest the caller expects (`expected_lock_sha256`), and the caller's `bindings` for custom tools and called agents. Its `facts` member states the shape of each fact, among them the installed software `packages` by registry. It is the shape of the `fabric-agent-ctl start --package-options` file.
+- `sdk/agent-package-fetch-report`: report of an agent package fetch: the folder to load, its lock file, every lock entry whose content was placed, with the commit it was read at and the digest it has, and every entry whose content is still not in the folder, with the reason.
+- `sdk/agent-package-fetch-options`: caller options of an agent package fetch: the entry document, the lock digest the caller expects (`expected_lock_sha256`), and the folder in the OCI image layout form that holds the artifacts the lock pins (`oci_layout`).
 
 ### Deferred Core Objects
 

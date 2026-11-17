@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The lock files pin every file of the package by the sha256 of its bytes.
+# Keep the bytes the same on every checkout: no line-ending conversion.
+release-notes-agent/** -text

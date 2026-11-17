@@ -171,6 +171,13 @@ Use typed extension models and publish their schemas at the exact descriptor
 extension point. Never treat `extensions` as an unchecked dictionary escape
 hatch.
 
+To run the plugins, hooks or called agents of an agent package, declare the root
+key `nemo_fabric.plugins.v1`, `nemo_fabric.hooks.v1` or `nemo_fabric.agents.v1`
+under `extension_schemas.agent_config.properties` with a closed schema that
+lists only what the adapter runs, and read the key from `config.extensions`. The
+package loader hands a key only to an adapter that declares it. See the
+[agent packages guide](https://github.com/NVIDIA/NeMo-Fabric/blob/main/docs/sdk/agent-packages.mdx).
+
 ## Implement the Lifecycle
 
 Implement exactly one `start`, zero or more ordered `invoke` operations, and
