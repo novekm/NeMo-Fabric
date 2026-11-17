@@ -207,6 +207,98 @@
       },
       "type": "object"
     },
+    "CheckerDecision": {
+      "description": "Whether a loaded package may start.",
+      "oneOf": [
+        {
+          "const": "allow",
+          "description": "The checker exited with 0 and its answer has `decision` set to `allow`.",
+          "type": "string"
+        },
+        {
+          "const": "deny",
+          "description": "The checker exited with 2 and its answer has `decision` set to `deny`,\nor the checker failed.",
+          "type": "string"
+        }
+      ]
+    },
+    "CheckerFailure": {
+      "description": "Why a checker counts as failed.",
+      "oneOf": [
+        {
+          "const": "not_started",
+          "description": "The program could not be started, or the report could not be written for it.",
+          "type": "string"
+        },
+        {
+          "const": "timed_out",
+          "description": "The program ran longer than the time limit. The loader ended it.",
+          "type": "string"
+        },
+        {
+          "const": "output_too_large",
+          "description": "The program wrote more than 1 MiB to standard output or to standard\nerror. The loader ends a program that is still running. The result\nis the same when the program had already ended by itself: it has no\nexit code and no answer.",
+          "type": "string"
+        },
+        {
+          "const": "unexpected_exit",
+          "description": "The program ended with an exit code that is neither 0 nor 2, or a signal ended it.",
+          "type": "string"
+        },
+        {
+          "const": "invalid_answer",
+          "description": "The program wrote something that is not one JSON object, or a\n`decision` that does not fit its exit code.",
+          "type": "string"
+        }
+      ]
+    },
+    "CheckerResult": {
+      "description": "What the checker answered about one loaded package, and what the load made of it.\n\nThe checker is a program the caller names in the options. It is asked once,\nafter the package passed its own checks and was mapped, and before anything\nstarts.",
+      "properties": {
+        "answer": {
+          "additionalProperties": true,
+          "description": "The JSON object the checker wrote. The load reads its `decision` and\nnothing else. The order of its keys is not kept, and a number is kept\nas a JSON number, so a long whole number can lose digits. None: the\nchecker wrote no single JSON object, or it was not started, ran past\nthe time limit or wrote more than it may. What such a checker wrote\nis not read.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "decision": {
+          "$ref": "#/$defs/CheckerDecision",
+          "description": "Whether the package may start. A checker that failed is a `deny`."
+        },
+        "detail": {
+          "description": "More about a failure, as text: why the checker could not be started,\nthat it wrote more than it may, or else the end of what it wrote to\nstandard error. None: the checker did not fail, or there is nothing\nto add.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exit_code": {
+          "description": "The exit code of the checker. None: it was not started, it ran past\nthe time limit, it wrote more than it may, or a signal ended it.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckerFailure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the checker counts as failed. None: it answered as it must."
+        }
+      },
+      "required": [
+        "decision"
+      ],
+      "type": "object"
+    },
     "ContainerSoftwareReport": {
       "additionalProperties": false,
       "description": "Existing environment-owner report of a container engine server.",
@@ -1845,6 +1937,11 @@
           "type": "string"
         },
         {
+          "const": "denied",
+          "description": "The package was checked and mapped, and the checker did not allow the\nstart. The report holds no config.",
+          "type": "string"
+        },
+        {
           "const": "verified_only",
           "description": "No config was given. The package was checked and nothing was mapped.",
           "type": "string"
@@ -3427,6 +3524,17 @@
       "description": "The base directory that relative config paths resolve against.",
       "type": "string"
     },
+    "checker_result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CheckerResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the checker named in the options answered. None: no checker was\nnamed, or the load ended before a checker is asked."
+    },
     "config": {
       "anyOf": [
         {
@@ -3439,7 +3547,7 @@
       "description": "The mapped config. Present only when `outcome` is `ready`."
     },
     "config_sha256": {
-      "description": "The sha256 of the mapped config, as lowercase hex, for drift detection.",
+      "description": "The sha256 of the mapped config, as lowercase hex, for drift detection.\nPresent when `outcome` is `ready` or `denied`.",
       "type": [
         "string",
         "null"

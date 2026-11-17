@@ -64,7 +64,11 @@ pub struct AgentPackageReport {
     /// The mapped config. Present only when `outcome` is `ready`.
     pub config: Option<FabricConfig>,
     /// The sha256 of the mapped config, as lowercase hex, for drift detection.
+    /// Present when `outcome` is `ready` or `denied`.
     pub config_sha256: Option<String>,
+    /// What the checker named in the options answered. None: no checker was
+    /// named, or the load ended before a checker is asked.
+    pub checker_result: Option<CheckerResult>,
 }
 
 /// How a load ended.
@@ -75,8 +79,70 @@ pub enum PackageOutcome {
     Ready,
     /// A required thing stopped the load. The report holds no config.
     Stopped,
+    /// The package was checked and mapped, and the checker did not allow the
+    /// start. The report holds no config.
+    Denied,
     /// No config was given. The package was checked and nothing was mapped.
     VerifiedOnly,
+}
+
+/// What the checker answered about one loaded package, and what the load made of it.
+///
+/// The checker is a program the caller names in the options. It is asked once,
+/// after the package passed its own checks and was mapped, and before anything
+/// starts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CheckerResult {
+    /// Whether the package may start. A checker that failed is a `deny`.
+    pub decision: CheckerDecision,
+    /// Why the checker counts as failed. None: it answered as it must.
+    pub failure: Option<CheckerFailure>,
+    /// The exit code of the checker. None: it was not started, it ran past
+    /// the time limit, it wrote more than it may, or a signal ended it.
+    pub exit_code: Option<i32>,
+    /// More about a failure, as text: why the checker could not be started,
+    /// that it wrote more than it may, or else the end of what it wrote to
+    /// standard error. None: the checker did not fail, or there is nothing
+    /// to add.
+    pub detail: Option<String>,
+    /// The JSON object the checker wrote. The load reads its `decision` and
+    /// nothing else. The order of its keys is not kept, and a number is kept
+    /// as a JSON number, so a long whole number can lose digits. None: the
+    /// checker wrote no single JSON object, or it was not started, ran past
+    /// the time limit or wrote more than it may. What such a checker wrote
+    /// is not read.
+    pub answer: Option<serde_json::Map<String, Value>>,
+}
+
+/// Whether a loaded package may start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckerDecision {
+    /// The checker exited with 0 and its answer has `decision` set to `allow`.
+    Allow,
+    /// The checker exited with 2 and its answer has `decision` set to `deny`,
+    /// or the checker failed.
+    Deny,
+}
+
+/// Why a checker counts as failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckerFailure {
+    /// The program could not be started, or the report could not be written for it.
+    NotStarted,
+    /// The program ran longer than the time limit. The loader ended it.
+    TimedOut,
+    /// The program wrote more than 1 MiB to standard output or to standard
+    /// error. The loader ends a program that is still running. The result
+    /// is the same when the program had already ended by itself: it has no
+    /// exit code and no answer.
+    OutputTooLarge,
+    /// The program ended with an exit code that is neither 0 nor 2, or a signal ended it.
+    UnexpectedExit,
+    /// The program wrote something that is not one JSON object, or a
+    /// `decision` that does not fit its exit code.
+    InvalidAnswer,
 }
 
 /// The adapter a package was mapped for.
@@ -565,6 +631,7 @@ mod tests {
             }],
             config_sha256: Some(config_sha256(&config).expect("digest")),
             config: Some(config),
+            checker_result: None,
         }
     }
 
@@ -602,6 +669,77 @@ mod tests {
     }
 
     #[test]
+    fn a_denied_report_holds_the_checker_result_and_serializes_to_its_committed_schema() {
+        let mut denied = sample_report();
+        denied.outcome = PackageOutcome::Denied;
+        denied.config = None;
+        let answer = serde_json::json!({
+            "decision": "deny",
+            "reasons": ["the hook guard is not on the approved list"],
+            "checker": {"name": "platform-policy", "version": "3"}
+        });
+        let results = [
+            CheckerResult {
+                decision: CheckerDecision::Deny,
+                failure: None,
+                exit_code: Some(2),
+                detail: None,
+                answer: answer.as_object().cloned(),
+            },
+            CheckerResult {
+                decision: CheckerDecision::Deny,
+                failure: Some(CheckerFailure::OutputTooLarge),
+                exit_code: None,
+                detail: Some("the checker wrote more than 1048576 bytes".to_string()),
+                answer: None,
+            },
+            CheckerResult {
+                decision: CheckerDecision::Deny,
+                failure: Some(CheckerFailure::TimedOut),
+                exit_code: None,
+                detail: Some("waiting for the policy folder".to_string()),
+                answer: None,
+            },
+        ];
+        for result in results {
+            denied.checker_result = Some(result);
+            let encoded = serde_json::to_value(&denied).expect("encode");
+
+            assert_eq!(
+                schema_errors(crate::schema::SchemaName::AgentPackageReport, &encoded),
+                Vec::<String>::new()
+            );
+            assert_eq!(
+                serde_json::from_value::<AgentPackageReport>(encoded.clone()).expect("decode"),
+                denied
+            );
+            assert_eq!(encoded["outcome"], "denied");
+            assert!(encoded["config"].is_null());
+        }
+        let encoded = serde_json::to_value(&denied).expect("encode");
+        assert_eq!(
+            encoded["checker_result"],
+            serde_json::json!({
+                "decision": "deny",
+                "failure": "timed_out",
+                "exit_code": null,
+                "detail": "waiting for the policy folder",
+                "answer": null
+            })
+        );
+        // A report written before the checker existed has no `checker_result` member.
+        let mut earlier = serde_json::to_value(sample_report()).expect("encode");
+        earlier
+            .as_object_mut()
+            .expect("object")
+            .remove("checker_result");
+        assert_eq!(
+            serde_json::from_value::<AgentPackageReport>(earlier).expect("decode"),
+            sample_report()
+        );
+    }
+
+    #[test]
     fn options_serialize_to_their_committed_schema() {
         use crate::agent_package::options::AgentPackageOptions;
 
@@ -612,7 +750,9 @@ mod tests {
             "if_unsupported": "warn",
             "if_unverified": "stop",
             "check_machine": true,
-            "facts": {"network": "internal", "software": {"uv": "0.4.18"}}
+            "facts": {"network": "internal", "software": {"uv": "0.4.18"}},
+            "checker": ["/opt/policy/bin/check-package", "--policy", "/sandbox/policy"],
+            "checker_timeout_seconds": 20
         }))
         .expect("options");
 

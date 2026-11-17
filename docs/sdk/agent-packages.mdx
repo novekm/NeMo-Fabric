@@ -69,9 +69,143 @@ async with await Fabric().start_agent_package(
     result = await runtime.invoke(input="Draft the notes for release 2.4.")
 ```
 
-`options` holds the load options by name. They are the keyword options of `load_agent_package`, and the members of the options file that `fabric-agent-ctl` reads: `entry`, `variables`, `instruction_mode`, `if_unsupported`, `if_unverified`, `check_machine`, `facts`, `expected_lock_sha256` and `bindings`. They are one mapping here, so they stay apart from the arguments of the start, and the same object can be that options file. A name that is not a load option is refused with `package_options_invalid` before anything is read. The other arguments, `session_ref`, `overrides` and `streaming`, mean what they mean for `Fabric.start_runtime`.
+`options` holds the load options by name. They are the keyword options of `load_agent_package`, and the members of the options file that `fabric-agent-ctl` reads: `entry`, `variables`, `instruction_mode`, `if_unsupported`, `if_unverified`, `check_machine`, `facts`, `expected_lock_sha256`, `bindings`, `checker` and `checker_timeout_seconds`. They are one mapping here, so they stay apart from the arguments of the start, and the same object can be that options file. A name that is not a load option is refused with `package_options_invalid` before anything is read. The other arguments, `session_ref`, `overrides` and `streaming`, mean what they mean for `Fabric.start_runtime`.
 
 The runtime holds the load report as `runtime.agent_package_report`. Each line of its `declared` list is one thing the package declares, with a `status` and what the load did about it in `effect`. A load can continue past a required thing, as [The Two Settings](#the-two-settings) describes. When it does, the call also logs one warning on the `nemo_fabric.client` logger that names each such line. To read the report before you start, use the two calls in [Load a Package in Python](#load-a-package-in-python). In a sandbox, where no Python caller sits between the load and the start, use the command in [Load a Package in a Sandbox](#load-a-package-in-a-sandbox).
+
+### Decide Before the Start
+
+A package can pass every check of the loader and still be one you do not want to start. Its lock is not the one your registry holds, it brings a hook, or it carries a connector you do not trust. NeMo Fabric has one place to say no, after the load and before the start. In Python, pass a function as `check`. In any place that loads a package, name a checker program in the load options, as [Ask a Checker Program](#ask-a-checker-program) describes. NeMo Fabric decides nothing there itself: it asks, and it starts only on `allow`.
+
+This decision is not a health check. `Fabric.check()` and `fabric-agent-ctl check` ask whether a runtime that already started is healthy, as [Health Checks](health-checks.mdx) describes. The `check` argument and the `checker` option here decide whether a package starts at all.
+
+To decide whether a loaded package may start, pass `check`. It is a function that takes the load report and returns a mapping. The start goes ahead only when the mapping's `decision` is `allow`. A package can carry a connector, and the mapped config starts its command. The following check allows only the carried connectors you trust:
+
+```python
+TRUSTED_CONNECTORS = {"agent:/connectors/changelog"}
+
+def only_trusted_connectors(report):
+    carried = {line.id for line in report.declared
+               if line.field == "connectors" and line.status == "mapped"}
+    unknown = sorted(carried - TRUSTED_CONNECTORS)
+    if unknown:
+        return {"decision": "deny",
+                "reasons": [f"{name} starts a command that is not trusted" for name in unknown]}
+    return {"decision": "allow"}
+
+runtime = await Fabric().start_agent_package(
+    "/sandbox/agent", config, base_dir="/sandbox", check=only_trusted_connectors,
+)
+```
+
+A hook and a plugin also start commands, on an adapter that takes them. They are lines of `report.declared` with the fields `hooks` and `plugins`, and a check can decide on them the same way.
+
+These rules hold for a check:
+
+- **It is asked once, after the load and before the start.** A plain function runs in a worker thread. A coroutine function is awaited.
+- **It is asked only about a package that can start.** A package that is refused, or a load that stopped, raises its own error first, and the check is not called.
+- **It fails closed.** Any answer other than a mapping whose `decision` is the string `allow` stops the start, and so does a check that raises.
+- **NeMo Fabric reads `decision` and nothing else.** The mapping can carry more, such as `reasons`, the name of the checker or the rules that decided. When the start is stopped, the error holds a plain copy of the mapping.
+- **It receives the load report.** The report is read only. A check can keep it for later.
+- **NeMo Fabric runs no check of its own.** The rules are yours. A check that decides by fixed rules gives the same answer for the same package.
+
+A start that the check stops raises `FabricConfigError` with `stage == "agent_package"` and one of these codes:
+
+| Code | When |
+| --- | --- |
+| `package_check_denied` | The check did not allow the start. `details["answer"]` holds a plain copy of its answer. An answer that is not JSON-compatible is named by its type in `details["answer_type"]`. |
+| `package_check_failed` | The check raised. The exception is the cause of the error. |
+
+### Ask a Checker Program
+
+A checker is a program that decides whether a loaded package may start. Name it in the load options as `checker`: the program, then its arguments. Use one when the decision belongs to a tool outside your application, such as the policy checker of a platform team, or when no Python caller sits between the load and the start. The following call starts the agent only when the checker allows it:
+
+```python
+runtime = await Fabric().start_agent_package(
+    "/sandbox/agent", config, base_dir="/sandbox",
+    options={"checker": ["/opt/platform/bin/check-package", "--policy", "/etc/platform/policy"]},
+)
+```
+
+The option means the same in every place that loads a package: `Fabric.start_agent_package`, `load_agent_package`, and the options file of `fabric-agent-ctl`. The list must name a program. An empty list is refused with `package_options_invalid` in each of those places, so a start command that builds the list from an empty setting never starts a package unchecked.
+
+The loader asks the checker once, last, after the package passed its own checks and was mapped. The following table is the whole contract between NeMo Fabric and a checker:
+
+| Point | What holds |
+| --- | --- |
+| How it is started | With no shell, in your working directory, and with the arguments you gave. Nothing is added to them. |
+| What it is given | Three environment variables. `NEMO_FABRIC_PACKAGE_DIR` is the package folder. `NEMO_FABRIC_PACKAGE_REPORT` is the path of a private file with the load report, without its `config` member. `NEMO_FABRIC_AGENT_NAME` is the name of the entry document. The file is in a folder of its own under the temp folder and is removed when the checker ended. It stays behind when the loading process is killed during the check. |
+| What else it sees | These variables of your environment, when they are set: `PATH`, `HOME`, `USER`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TMPDIR`, `TMP`, `TEMP`, `SYSTEMROOT`, `COMSPEC`, `PATHEXT` and `USERPROFILE`. No other variable reaches it, so no credential held in an environment variable does. Its standard input is empty. |
+| What it answers | One JSON object on standard output, and an exit code. Exit code 0 with `"decision": "allow"` lets the package start. Exit code 2 with `"decision": "deny"` does not. |
+| Anything else | A deny, reported as a checker that failed: another exit code, output that is not one JSON object, a `decision` that does not fit the exit code, a program that cannot be started, a time limit that passed, or more written than the checker may write. |
+| The time limit | `checker_timeout_seconds` in the load options, 30 by default. A checker that runs longer is ended. |
+| How much it may write | 1 MiB to standard output and 1 MiB to standard error. A checker that writes more fails as `output_too_large`, with no exit code and no answer. That result is the same whether the checker was still running or had already ended. A checker that is still running is ended, so a checker that goes wrong cannot fill the disk. |
+| A program the checker starts | Neither limit ends it. A program the checker leaves behind can keep writing to the checker's standard output and standard error after the load returned. What it writes there before the loader has read them counts as the checker's own, so such a load can be denied as `output_too_large` or `invalid_answer`. |
+| What is kept | The report's `checker_result` member: the decision, the failure when there is one, the exit code, a `detail` text for a failure, and the checker's object as `answer`. NeMo Fabric reads `decision` from the object and nothing else. The order of the object's keys is not kept, and a number is read as a JSON number, so write a digest or a serial number as text. |
+| When it is not asked | For a package that is refused, for a load that stopped, and for a load with no config. With no `checker`, nothing is asked and the load is what it was. |
+
+A checker reads the report file and applies its rules. The following checker is complete. It allows a package only when every connector the package carries is on a list:
+
+```python
+#!/usr/bin/env python3
+import json
+import os
+import sys
+
+TRUSTED_CONNECTORS = {"agent:/connectors/changelog"}
+
+with open(os.environ["NEMO_FABRIC_PACKAGE_REPORT"], encoding="utf-8") as file:
+    report = json.load(file)
+carried = {line["id"] for line in report["declared"]
+           if line["field"] == "connectors" and line["status"] == "mapped"}
+unknown = sorted(carried - TRUSTED_CONNECTORS)
+if unknown:
+    print(json.dumps({"decision": "deny",
+                      "reasons": [f"{name} starts a command that is not trusted" for name in unknown]}))
+    sys.exit(2)
+print(json.dumps({"decision": "allow"}))
+```
+
+The object can carry more than the decision. A checker can add its `reasons`, the `rules` that decided, and a `checker` object with its name, its version and a digest of its policy. NeMo Fabric keeps all of it in the report and reads none of it.
+
+A load the checker does not allow has `outcome: denied` and no config. Its report holds the answer, shown here without the other members:
+
+```json
+{
+  "outcome": "denied",
+  "checker_result": {
+    "decision": "deny",
+    "failure": null,
+    "exit_code": 2,
+    "detail": null,
+    "answer": {
+      "decision": "deny",
+      "reasons": ["agent:/connectors/changelog starts a command that is not trusted"]
+    }
+  }
+}
+```
+
+For such a load, `report.to_config()` and `Fabric.start_agent_package` raise `FabricConfigError` with `stage == "agent_package"` and one of these codes:
+
+| Code | When |
+| --- | --- |
+| `package_check_denied` | The checker answered `deny`. `details["answer"]` holds its object. |
+| `package_check_failed` | The checker failed. `details["failure"]` is `not_started`, `timed_out`, `output_too_large`, `unexpected_exit` or `invalid_answer`. `details["exit_code"]` and `details["answer"]` hold what the checker gave, when it gave any. `details["detail"]` says more, when there is more to say. |
+
+For a checker that failed, `detail` is one of three texts. It is what the operating system said about a checker that could not be started, or that the checker wrote more than it may, or else the end of what the checker wrote to standard error, at most 2000 characters. A checker that answered as it must has no `detail`, and what it wrote to standard error is dropped.
+
+When you pass a checker and a `check` function, the checker is asked first, during the load. The function is called only when the checker allowed the start, and the report it receives holds the checker's answer in `checker_result`.
+
+### What a Checker Is Not
+
+- **It is not part of NeMo Fabric.** NeMo Fabric ships no checker, needs none, and knows none by name. Any program that keeps the contract is a checker.
+- **It is not a policy engine in the runtime.** NeMo Fabric evaluates no policy. It pins the policies a package links and reports them. A checker is where they can be read and applied.
+- **It is not a place to call a model.** A decision before a start is made by fixed rules, so the same package and the same policy give the same answer.
+- **It is not a second lock check.** The loader checks the lock and every pin first, and a checker is never asked about a package that failed them. A checker can check more, but it cannot let a refused package start.
+- **It is not a guard for a running agent.** It is asked once, before the start. To stop a running agent, the side that decides calls `Runtime.stop()` or `fabric-agent-ctl stop`.
+- **It is not enforced on a caller who names none.** A checker is asked only by a load that names it. A start with no `checker`, and a start that loads no package, ask nothing. Whoever builds the start command decides that the checker is always named.
+- **It is not confined.** A checker runs as your user, with a small environment and no shell. Name a program you trust, by its full path.
 
 ## Load a Package in Python
 
@@ -125,7 +259,8 @@ fabric-agent-ctl start --agent release-notes-agent \
 | --- | --- |
 | `--package DIR` | Load this package with the config from `--config`. Requires `--config` and `--report`. Not allowed with `--request`. |
 | `--report FILE` | Write the load report to this file before the start request is sent. Required with `--package`. The file is created with mode `0600` and holds the report without its `config` member. |
-| `--package-options FILE` | A JSON object with the load options: `entry`, `variables`, `instruction_mode`, `if_unsupported`, `if_unverified`, `check_machine`, `facts`, `expected_lock_sha256` and `bindings`. Its schema is `schemas/sdk/agent-package-options.schema.json`. |
+| `--package-options FILE` | A JSON object with the load options: `entry`, `variables`, `instruction_mode`, `if_unsupported`, `if_unverified`, `check_machine`, `facts`, `expected_lock_sha256`, `bindings`, `checker` and `checker_timeout_seconds`. Its schema is `schemas/sdk/agent-package-options.schema.json`. |
+| `--package-checker JSON` | The checker program and its arguments, as one JSON array of text. It is the `checker` member of the options file, given on the command line. Name the checker in one of the two places. |
 
 The options file is one JSON object. The following file gives a value to one variable, lets the load continue past things that are not mapped, and anchors the lock:
 
@@ -145,7 +280,18 @@ That is why the report file is required. With `if_unsupported` set to `warn`, a 
 
 On a refusal the file is not a load report. It holds `schema_version: fabric.agent_package_refusal/v1alpha1`, `outcome: refused`, and an `error` object with the code, the subject and the message. Read `outcome` first.
 
-The command loads and starts in one step. With `if_unsupported` set to `warn`, the start request is sent as soon as the report is written, so nothing can read the report in between. To decide before the start, use one of these:
+The command loads and starts in one step, so nothing outside it can read the report in between. To decide before the start, name a checker. The command asks it after the package is loaded and before the start request is sent:
+
+```sh
+fabric-agent-ctl start --agent release-notes-agent \
+  --config /sandbox/config.json --package /sandbox/agent \
+  --report /sandbox/package-report.json \
+  --package-checker '["/opt/platform/bin/check-package", "--policy", "/etc/platform/policy"]'
+```
+
+When the checker does not allow the start, the command sends nothing. It returns `validation_failed` with the cause `package_check_denied`, or `package_check_failed` for a checker that failed. The report file then has `outcome: denied` and holds the checker's answer under `checker_result`, with its reasons. Refer to [Ask a Checker Program](#ask-a-checker-program) for the contract.
+
+Without a checker, use one of these:
 
 - Call `load_agent_package` in the sandbox first and read the report. Then pass the report's `lock.sha256` as `expected_lock_sha256` in the options file, so the command starts only the package you looked at.
 - Read the report file after the start, and stop the runtime with `fabric-agent-ctl stop` when the report lists something you cannot do without.
@@ -319,6 +465,7 @@ The loader works in this order:
 6. Give each runtime need a status.
 7. Map the agent onto the config, give each bound thing its line, and plan the result on the selected adapter.
 8. Apply the two settings, `if_unsupported` and `if_unverified`, and build the report.
+9. Ask the checker, when the options name one and the load is ready. Refer to [Ask a Checker Program](#ask-a-checker-program).
 
 ## What Mapped Means
 
@@ -466,7 +613,7 @@ A skill's content is pinned. Mount it read-only or read-write as your platform d
 
 A connector is an MCP server. The package says where it lives by its source.
 
-**Carried in the package.** The connector's folder holds `mcp.json`, with one entry under `mcpServers` for each server: `type`, `command`, and optionally `args`, `env` and `cwd`. The loader maps each `stdio` server to an `mcp.servers` entry. The harness then starts that command when the runtime starts, so a package with a carried connector chooses a command that runs on your machine. The loader itself starts nothing. The server starts in its `cwd`, resolved inside the connector's folder. It starts in the connector's folder when `cwd` is left out or is `.`. Strings are passed as written, and nothing is expanded. The server key is the connector's name when the file has one server, and `<connector>-<server>` when it has more.
+**Carried in the package.** The connector's folder holds `mcp.json`, with one entry under `mcpServers` for each server: `type`, `command`, and optionally `args`, `env` and `cwd`. The loader maps each `stdio` server to an `mcp.servers` entry. The harness then starts that command when the runtime starts, so a package with a carried connector chooses a command that runs on your machine. The loader itself starts nothing a package names. The server starts in its `cwd`, resolved inside the connector's folder. It starts in the connector's folder when `cwd` is left out or is `.`. Strings are passed as written, and nothing is expanded. The server key is the connector's name when the file has one server, and `<connector>-<server>` when it has more.
 
 The loader reads those five keys and no others. Any other key of a server entry, such as `disabled` or `timeout`, has no effect. The connector's line names each such key in its `detail`, and the report has a note with the code `connector_key_not_read`.
 
@@ -747,7 +894,7 @@ A `software` fact lists every program on the machine. A program you leave out is
 
 The probe reads no interface, family or model of a GPU. A GPU need that names one of those is `could_not_be_checked` unless you pass the `gpus` fact with those members. A GPU fact with no `interface` member is no fact about interfaces: it never makes a need `not_met`.
 
-The loader never runs a program because a document names it. It runs only version commands from its own fixed list. A program that is on `PATH` and not on that list is `could_not_be_checked`. So is a program whose name holds a path separator, because only a bare name is looked up.
+The loader never runs a program because a document names it. For facts about the machine it runs only version commands from its own fixed list. A program that is on `PATH` and not on that list is `could_not_be_checked`. So is a program whose name holds a path separator, because only a bare name is looked up.
 
 With neither a fact nor a probe, a need is `could_not_be_checked`. The network reach is never probed: pass the reach your platform allows as the `network` fact. An agent that is allowed less reach than it asks for has a need that is `not_met`.
 
@@ -796,7 +943,7 @@ The two settings decide about a start. With no config nothing starts, so they ar
 
 | Member | What it holds |
 | --- | --- |
-| `outcome` | `ready`, `stopped` or `verified_only`. |
+| `outcome` | `ready`, `stopped`, `denied` or `verified_only`. |
 | `stopped_by` | The ids of the declared things that stopped the load. |
 | `entry`, `agent` | The entry document and the agent that runs: kind, name, lock address, path and digest. |
 | `lock` | The lock file: path, SHA-256, generator and entry count. |
@@ -806,7 +953,8 @@ The two settings decide about a start. With no config nothing starts, so they ar
 | `declared` | Every declared thing with its status. |
 | `digests` | Every lock entry with what was checked. |
 | `notes` | Things that did not stop the load. Each has a `code`, a `subject` and a `text`. The codes are `limit_lowered`, `local_version_ignored`, `retracted`, `entry_kept_once`, `source_not_compared`, `connector_key_not_read` and `called_agent_cannot_start`. |
-| `config`, `config_sha256` | The mapped config and a SHA-256 of it. Present when the outcome is `ready`. |
+| `config`, `config_sha256` | The mapped config and a SHA-256 of it. Present when the outcome is `ready`. A `denied` report keeps the SHA-256 and has no config. |
+| `checker_result` | What the checker answered, when the options name one and the load got that far: `decision`, `failure`, `exit_code`, `detail` and the checker's `answer`. Refer to [Ask a Checker Program](#ask-a-checker-program). |
 
 A line of `declared` has an `id` made of the stating document and a JSON Pointer into it, such as `agent:/skills/release-notes` or `definition:/limits/max_turns`. It also has `kind`, `field`, `name`, `required`, `status`, `gap`, `effect`, `mapped_to`, `bound_to`, the author's `reason` and the loader's `detail`.
 
@@ -875,6 +1023,7 @@ except FabricConfigError as error:
 | `package_fetch_failed` | Raised by a fetch: `git` could not be run or could not fetch, the repository does not have the pinned commit or the folder, a fetched folder holds two names that are one file on this file system, or the layout folder does not hold the pinned artifact. |
 | `package_out_dir_in_use` | Raised by a fetch: `out_dir` holds something, is inside the package folder, or cannot be made. |
 | `package_config_required`, `package_requirements_unmet` | Raised by `to_config()` when no config was given, or when the load stopped. |
+| `package_check_denied`, `package_check_failed` | Raised by `to_config()` and by `Fabric.start_agent_package` when the checker or the check did not allow the start, or when the checker failed or the check raised. |
 
 An error from the config itself, such as an unknown adapter, is not a package refusal. It is raised as `FabricConfigError` with the planner's message, as `Fabric.plan` raises it: it has no stage, no code and no subject.
 
@@ -916,7 +1065,7 @@ The loader does not do the following. Each one is reported, never dropped.
 | Supplying or registering custom tools. | The loader keeps your `tools.definitions` entry, or the line is `bound` when you give a binding. It writes no definition, and it does not import, resolve or run a target. |
 | Writing bindings into the mapped config. | The bindings are in the report's `declared` lines only. |
 | Starting a runtime from a package in a remote environment through the SDK. | Not done. `Fabric.start_runtime_in` takes a config. Refer to [Load a Package in a Sandbox](#load-a-package-in-a-sandbox). |
-| Evaluating policies. | `not_mapped`. A policy is never reported as evaluated. |
+| Evaluating policies. | `not_mapped`. A policy is never reported as evaluated. A checker you name can read and apply them before the start. |
 | Installing `packages`, or probing for them. | The line has the status the `packages` fact gives it, and it is `not_mapped` with no fact about its registry. The lock pin is in `digests`. |
 | Enforcing `max_parallel`, `max_depth` and `max_total_tokens`. | `not_mapped`. The line names the component that enforces the limit. |
 | Comparing a running connector or agent with its pin. | `could_not_be_checked`. |

@@ -110,10 +110,11 @@ def load_package_config(
     """Load an agent package with the caller's config and return the mapped config.
 
     The package is read and checked in this short-lived client process, before
-    the start request is sent. A refusal or a stop becomes ``validation_failed``
-    with the package code as its cause. No path, value or message is printed:
-    the report file carries them. The report file is always written, so nothing
-    a package declares is dropped without a word.
+    the start request is sent. A checker the options name is asked there too.
+    A refusal, a stop or a start the checker does not allow becomes
+    ``validation_failed`` with the package code as its cause. No path, value
+    or message is printed: the report file carries them. The report file is
+    always written, so nothing a package declares is dropped without a word.
     """
     if transport.fcntl is None:
         raise ProtocolError("platform_unsupported", "transport", unsupported=True)
@@ -154,11 +155,34 @@ def load_package_config(
         ) from error
     mapped = report.pop("config", None)
     write_report(report_path, report)
+    if report.get("outcome") == "denied":
+        raise ProtocolError(
+            "validation_failed",
+            "validation",
+            cause="package_check_denied"
+            if report["checker_result"]["failure"] is None
+            else "package_check_failed",
+        )
     if report.get("outcome") != "ready" or not isinstance(mapped, dict):
         raise ProtocolError(
             "validation_failed", "validation", cause="package_requirements_unmet"
         )
     return mapped
+
+
+def read_checker(text: str) -> list[str]:
+    """Read ``--package-checker``: one JSON array, the program and then its arguments."""
+    try:
+        command = decode_json(text.encode("utf-8"))
+    except (ValueError, RecursionError) as error:
+        raise ProtocolError() from error
+    if (
+        not isinstance(command, list)
+        or not command
+        or not all(isinstance(part, str) for part in command)
+    ):
+        raise ProtocolError()
+    return command
 
 
 def parse_command(arguments: list[str]) -> dict[str, Any]:
@@ -186,6 +210,7 @@ def parse_command(arguments: list[str]) -> dict[str, Any]:
             "--timeout-seconds",
             "--package",
             "--package-options",
+            "--package-checker",
             "--report",
         ):
             if index + 1 == len(arguments) or (
@@ -215,7 +240,7 @@ def parse_command(arguments: list[str]) -> dict[str, Any]:
             # The report names what was warned about, left out or refused.
             # Stdout carries only a fixed cause, so the report is required.
             required.add("--report")
-            allowed.update({"--package-options", "--report"})
+            allowed.update({"--package-options", "--package-checker", "--report"})
     if operation == "check":
         allowed.add("--timeout-seconds")
         if flags.keys() & {"--agent", "--runtime-id"}:
@@ -267,12 +292,20 @@ def parse_command(arguments: list[str]) -> dict[str, Any]:
     if "--package" in flags:
         # Reject a request the server would reject before reading the package.
         encode_request(request)
+        options = (
+            read_input(flags["--package-options"])
+            if "--package-options" in flags
+            else {}
+        )
+        if "--package-checker" in flags:
+            # One place names the checker: the flag or the options file.
+            if not isinstance(options, dict) or "checker" in options:
+                raise ProtocolError()
+            options["checker"] = read_checker(flags["--package-checker"])
         request["config"] = load_package_config(
             flags["--package"],
             request["config"],
-            options=read_input(flags["--package-options"])
-            if "--package-options" in flags
-            else {},
+            options=options,
             report_path=flags["--report"],
         )
     if operation == "invoke":

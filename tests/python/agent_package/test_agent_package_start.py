@@ -4,8 +4,10 @@
 """Start a runtime from an agent package in one call."""
 
 import logging
+import sys
+import threading
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import nemo_fabric.client as client_module
 import pytest
@@ -170,6 +172,260 @@ async def test_start_with_nothing_passed_over_logs_nothing(
     assert caplog.messages == []
 
 
+@pytest.mark.parametrize("mock_type", [MagicMock, AsyncMock])
+async def test_check_that_allows_lets_the_start_go(
+    client, package_dir, shim_config, hermes_shim_agent_dir, mock_type
+):
+    check = mock_type(return_value={"decision": "allow", "rules": ["lock-is-anchored"]})
+
+    runtime = await client.start_agent_package(
+        package_dir, shim_config, base_dir=hermes_shim_agent_dir, check=check
+    )
+    await runtime.stop()
+
+    check.assert_called_once()
+    (report,) = check.call_args.args
+    assert isinstance(report, AgentPackageReport)
+    assert report.outcome == "ready"
+    assert report.agent["name"] == "release-notes-agent"
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {
+            "decision": "deny",
+            "reasons": ["The lock is not the one the registry holds."],
+        },
+        {"decision": "ALLOW"},
+        {"reasons": []},
+        "allow",
+        True,
+        None,
+    ],
+)
+async def test_check_that_does_not_allow_starts_nothing(
+    client, mock_start_runtime, package_dir, shim_config, hermes_shim_agent_dir, answer
+):
+    check = MagicMock(return_value=answer)
+
+    with pytest.raises(FabricConfigError) as caught:
+        await client.start_agent_package(
+            package_dir, shim_config, base_dir=hermes_shim_agent_dir, check=check
+        )
+
+    assert caught.value.stage == "agent_package"
+    assert caught.value.code == "package_check_denied"
+    assert caught.value.details == {"answer": answer}
+    check.assert_called_once()
+    mock_start_runtime.assert_not_awaited()
+
+
+async def test_coroutine_check_that_denies_starts_nothing(
+    client, mock_start_runtime, package_dir, shim_config, hermes_shim_agent_dir
+):
+    answer = {"decision": "deny", "reasons": ["The lock is not anchored."]}
+    check = AsyncMock(return_value=answer)
+
+    with pytest.raises(FabricConfigError) as caught:
+        await client.start_agent_package(
+            package_dir, shim_config, base_dir=hermes_shim_agent_dir, check=check
+        )
+
+    assert caught.value.code == "package_check_denied"
+    assert caught.value.details == {"answer": answer}
+    check.assert_awaited_once()
+    mock_start_runtime.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("answer", "answer_type"),
+    [
+        # Equal to "allow" by ``==``, and not the string.
+        ({"decision": ANY}, "dict"),
+        ({"decision": "deny", "held": threading.Lock()}, "dict"),
+        (threading.Lock(), "lock"),
+    ],
+)
+async def test_answer_that_is_not_json_is_denied_and_named_by_its_type(
+    client,
+    mock_start_runtime,
+    package_dir,
+    shim_config,
+    hermes_shim_agent_dir,
+    answer,
+    answer_type,
+):
+    check = MagicMock(return_value=answer)
+
+    with pytest.raises(FabricConfigError) as caught:
+        await client.start_agent_package(
+            package_dir, shim_config, base_dir=hermes_shim_agent_dir, check=check
+        )
+
+    assert caught.value.stage == "agent_package"
+    assert caught.value.code == "package_check_denied"
+    assert caught.value.details == {"answer_type": answer_type}
+    mock_start_runtime.assert_not_awaited()
+
+
+async def test_denied_answer_that_holds_report_parts_is_given_back_plain(
+    client, mock_start_runtime, package_dir, shim_config, hermes_shim_agent_dir
+):
+    def deny_with_what_it_read(report):
+        return {
+            "decision": "deny",
+            "lines": [line for line in report.declared if line["field"] == "skills"],
+            "lock": report.lock,
+        }
+
+    check = MagicMock(side_effect=deny_with_what_it_read)
+
+    with pytest.raises(FabricConfigError) as caught:
+        await client.start_agent_package(
+            package_dir, shim_config, base_dir=hermes_shim_agent_dir, check=check
+        )
+
+    (report,) = check.call_args.args
+    plain = report.to_mapping()
+    assert caught.value.code == "package_check_denied"
+    assert caught.value.details == {
+        "answer": {
+            "decision": "deny",
+            "lines": [line for line in plain["declared"] if line["field"] == "skills"],
+            "lock": plain["lock"],
+        }
+    }
+    mock_start_runtime.assert_not_awaited()
+
+
+@pytest.mark.parametrize("mock_type", [MagicMock, AsyncMock])
+async def test_check_that_raises_starts_nothing(
+    client,
+    mock_start_runtime,
+    package_dir,
+    shim_config,
+    hermes_shim_agent_dir,
+    mock_type,
+):
+    failure = OSError("the policy folder is not readable")
+    check = mock_type(side_effect=failure)
+
+    with pytest.raises(FabricConfigError, match="the policy folder") as caught:
+        await client.start_agent_package(
+            package_dir, shim_config, base_dir=hermes_shim_agent_dir, check=check
+        )
+
+    assert caught.value.stage == "agent_package"
+    assert caught.value.code == "package_check_failed"
+    assert caught.value.__cause__ is failure
+    mock_start_runtime.assert_not_awaited()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="A checker has not been run on Windows yet"
+)
+async def test_start_with_a_checker_that_denies_starts_nothing(
+    client,
+    mock_start_runtime,
+    package_dir,
+    shim_config,
+    hermes_shim_agent_dir,
+    package_checker,
+):
+    check = MagicMock(return_value={"decision": "allow"})
+
+    with pytest.raises(FabricConfigError) as caught:
+        await client.start_agent_package(
+            package_dir,
+            shim_config,
+            base_dir=hermes_shim_agent_dir,
+            options={"checker": package_checker("deny")},
+            check=check,
+        )
+
+    assert caught.value.stage == "agent_package"
+    assert caught.value.code == "package_check_denied"
+    assert caught.value.details == {
+        "answer": {
+            "decision": "deny",
+            "reasons": ["The skill release-notes is not on the approved list."],
+            "rules": ["approved-skills"],
+        }
+    }
+    # The check in Python is asked only about a package that can start.
+    check.assert_not_called()
+    mock_start_runtime.assert_not_awaited()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="A checker has not been run on Windows yet"
+)
+async def test_start_with_a_checker_that_fails_starts_nothing(
+    client,
+    mock_start_runtime,
+    package_dir,
+    shim_config,
+    hermes_shim_agent_dir,
+    package_checker,
+):
+    with pytest.raises(FabricConfigError) as caught:
+        await client.start_agent_package(
+            package_dir,
+            shim_config,
+            base_dir=hermes_shim_agent_dir,
+            options={"checker": package_checker("no-json")},
+        )
+
+    assert caught.value.code == "package_check_failed"
+    assert caught.value.details["failure"] == "invalid_answer"
+    mock_start_runtime.assert_not_awaited()
+
+
+async def test_start_with_a_checker_that_names_no_program_starts_nothing(
+    client, mock_start_runtime, package_dir, shim_config, hermes_shim_agent_dir
+):
+    with pytest.raises(FabricConfigError) as caught:
+        await client.start_agent_package(
+            package_dir,
+            shim_config,
+            base_dir=hermes_shim_agent_dir,
+            options={"checker": []},
+        )
+
+    assert caught.value.code == "package_options_invalid"
+    assert caught.value.details["subject"] == "checker"
+    mock_start_runtime.assert_not_awaited()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="A checker has not been run on Windows yet"
+)
+async def test_start_with_a_checker_that_allows_starts_and_the_check_reads_its_answer(
+    client,
+    mock_start_runtime,
+    package_dir,
+    shim_config,
+    hermes_shim_agent_dir,
+    package_checker,
+):
+    check = MagicMock(return_value={"decision": "allow"})
+
+    runtime = await client.start_agent_package(
+        package_dir,
+        shim_config,
+        base_dir=hermes_shim_agent_dir,
+        options={"checker": package_checker("allow"), "checker_timeout_seconds": 20},
+        check=check,
+    )
+
+    assert runtime is mock_start_runtime.return_value
+    mock_start_runtime.assert_awaited_once()
+    (report,) = check.call_args.args
+    assert report.checker_result["decision"] == "allow"
+    assert report.checker_result["answer"]["rules"] == ["approved-hooks"]
+
+
 async def test_stopped_load_starts_nothing(
     tmp_path,
     client,
@@ -183,14 +439,16 @@ async def test_stopped_load_starts_nothing(
     agent["instructions"] = "Write one short line for each change."
     package = tmp_path / "package"
     write_package(package, agent, package_files)
+    check = MagicMock(return_value={"decision": "allow"})
 
     with pytest.raises(FabricConfigError) as caught:
         await client.start_agent_package(
-            package, shim_config, base_dir=hermes_shim_agent_dir
+            package, shim_config, base_dir=hermes_shim_agent_dir, check=check
         )
 
     assert caught.value.code == "package_requirements_unmet"
     assert caught.value.details == {"stopped_by": ["agent:/instructions"]}
+    check.assert_not_called()
     mock_start_runtime.assert_not_awaited()
 
 
@@ -199,14 +457,16 @@ async def test_refused_package_starts_nothing(
 ):
     skill = package_dir / "skills" / "release-notes" / "SKILL.md"
     skill.write_text("# Changed after the lock was written\n", encoding="utf-8")
+    check = MagicMock(return_value={"decision": "allow"})
 
     with pytest.raises(FabricConfigError) as caught:
         await client.start_agent_package(
-            package_dir, shim_config, base_dir=hermes_shim_agent_dir
+            package_dir, shim_config, base_dir=hermes_shim_agent_dir, check=check
         )
 
     assert caught.value.stage == "agent_package"
     assert caught.value.code == "package_digest_mismatch"
+    check.assert_not_called()
     mock_start_runtime.assert_not_awaited()
 
 
@@ -220,12 +480,15 @@ async def test_refused_package_starts_nothing(
 async def test_unknown_option_is_refused_before_the_load(
     client, mock_start_runtime, shim_config, tmp_path, options, subject
 ):
+    check = MagicMock()
+
     with pytest.raises(FabricConfigError) as caught:
         await client.start_agent_package(
-            tmp_path / "no-such-package", shim_config, options=options
+            tmp_path / "no-such-package", shim_config, options=options, check=check
         )
 
     assert caught.value.stage == "agent_package"
     assert caught.value.code == "package_options_invalid"
     assert caught.value.details == {"subject": subject}
+    check.assert_not_called()
     mock_start_runtime.assert_not_awaited()

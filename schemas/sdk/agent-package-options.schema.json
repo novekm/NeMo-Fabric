@@ -47,6 +47,24 @@
       "description": "Probe this machine for runtime facts. Default false. The probe does\nnot look for installed software packages.",
       "type": "boolean"
     },
+    "checker": {
+      "description": "A program that decides whether the loaded package may start: the\nprogram, then its arguments. Left out: no checker is asked. An empty\nlist is refused.\n\nThe checker is asked once, after the package passed its own checks and\nwas mapped. It is started with no shell. It gets the package folder in\n`NEMO_FABRIC_PACKAGE_DIR`, the path of a copy of the load report\nwithout its config in `NEMO_FABRIC_PACKAGE_REPORT`, and the name of the\nentry document in `NEMO_FABRIC_AGENT_NAME`. The loader adds nothing to\nits arguments. Of the caller's environment it keeps operating-system\nvariables such as `PATH` and `HOME`, and no other.\n\nThe checker writes one JSON object to standard output. Exit code 0\nwith `\"decision\": \"allow\"` lets the package start. Exit code 2 with\n`\"decision\": \"deny\"` does not. Anything else is a deny, reported as a\nchecker that failed. The report holds the answer under\n`checker_result`, and a load the checker does not allow has outcome\n`denied` and no config.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "checker_timeout_seconds": {
+      "description": "The time limit of the checker, in seconds. Default 30. A checker that\nruns longer is ended, and the load is denied.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
     "entry": {
       "description": "The entry document, as a path inside the package, when it is not at the root\n(for example a definition kept at `variants/short/agent-definition.json`).",
       "type": [

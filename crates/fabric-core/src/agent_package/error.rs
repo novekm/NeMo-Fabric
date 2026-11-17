@@ -5,11 +5,12 @@
 
 /// One stable refusal code. The text of a code never changes meaning.
 ///
-/// Two more codes exist that are never an error in Rust. The Python SDK raises
+/// Four more codes exist that are never an error in Rust. The Python SDK raises
 /// `package_config_required` when a report with no config is turned into one,
 /// and `package_requirements_unmet` for a load that the `if_unsupported` or
-/// `if_unverified` setting stopped. The command bridge gives the second as its
-/// cause.
+/// `if_unverified` setting stopped. For a load the checker did not allow it
+/// raises `package_check_denied`, or `package_check_failed` when the checker
+/// failed. The command bridge gives the last three as its cause.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PackageErrorCode {
     NotFound,

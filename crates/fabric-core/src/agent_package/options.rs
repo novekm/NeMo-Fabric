@@ -75,6 +75,30 @@ pub struct AgentPackageOptions {
     /// keeps a line of its own in the report, and no binding accounts for it.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub bindings: BTreeMap<String, String>,
+    /// A program that decides whether the loaded package may start: the
+    /// program, then its arguments. Left out: no checker is asked. An empty
+    /// list is refused.
+    ///
+    /// The checker is asked once, after the package passed its own checks and
+    /// was mapped. It is started with no shell. It gets the package folder in
+    /// `NEMO_FABRIC_PACKAGE_DIR`, the path of a copy of the load report
+    /// without its config in `NEMO_FABRIC_PACKAGE_REPORT`, and the name of the
+    /// entry document in `NEMO_FABRIC_AGENT_NAME`. The loader adds nothing to
+    /// its arguments. Of the caller's environment it keeps operating-system
+    /// variables such as `PATH` and `HOME`, and no other.
+    ///
+    /// The checker writes one JSON object to standard output. Exit code 0
+    /// with `"decision": "allow"` lets the package start. Exit code 2 with
+    /// `"decision": "deny"` does not. Anything else is a deny, reported as a
+    /// checker that failed. The report holds the answer under
+    /// `checker_result`, and a load the checker does not allow has outcome
+    /// `denied` and no config.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checker: Option<Vec<String>>,
+    /// The time limit of the checker, in seconds. Default 30. A checker that
+    /// runs longer is ended, and the load is denied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checker_timeout_seconds: Option<f64>,
 }
 
 impl Default for AgentPackageOptions {
@@ -89,6 +113,8 @@ impl Default for AgentPackageOptions {
             facts: None,
             expected_lock_sha256: None,
             bindings: BTreeMap::new(),
+            checker: None,
+            checker_timeout_seconds: None,
         }
     }
 }
@@ -120,6 +146,43 @@ mod tests {
 
             serde_json::from_str::<AgentPackageOptions>(&text).expect_err(target);
         }
+    }
+
+    #[test]
+    fn a_checker_is_a_list_of_text_with_a_time_limit_in_seconds() {
+        for text in [
+            r#"{"checker": "/opt/policy/bin/check-package --policy /sandbox/policy"}"#,
+            r#"{"checker": ["/opt/policy/bin/check-package", 3]}"#,
+            r#"{"checker_timeout_seconds": "20"}"#,
+        ] {
+            serde_json::from_str::<AgentPackageOptions>(text).expect_err(text);
+        }
+
+        let options: AgentPackageOptions = serde_json::from_value(serde_json::json!({
+            "checker": ["/opt/policy/bin/check-package", "--policy", "/sandbox/policy"],
+            "checker_timeout_seconds": 20
+        }))
+        .expect("options");
+
+        assert_eq!(
+            options.checker.as_deref().expect("a checker"),
+            [
+                "/opt/policy/bin/check-package",
+                "--policy",
+                "/sandbox/policy"
+            ]
+        );
+        assert_eq!(options.checker_timeout_seconds, Some(20.0));
+        let encoded = serde_json::to_value(&options).expect("encode");
+        assert_eq!(
+            serde_json::from_value::<AgentPackageOptions>(encoded).expect("decode"),
+            options
+        );
+        // An empty list is not the same as no checker: the load refuses it.
+        let empty: AgentPackageOptions =
+            serde_json::from_str(r#"{"checker": []}"#).expect("options");
+        assert_eq!(empty.checker, Some(Vec::new()));
+        assert_eq!(AgentPackageOptions::default().checker, None);
     }
 
     #[test]

@@ -28,6 +28,7 @@ SPDX-License-Identifier: Apache-2.0 -->
 - [`capabilities.AdapterCapabilityProfile`](./nemo_fabric.capabilities.md#class-adaptercapabilityprofile): Declared runtime support, not observed execution provenance.
 - [`capabilities.AdapterCompatibilityIssue`](./nemo_fabric.capabilities.md#class-adaptercompatibilityissue): A value-free incompatibility at a NeMo Fabric configuration field.
 - [`capabilities.AdapterInspection`](./nemo_fabric.capabilities.md#class-adapterinspection): Metadata compatibility report; a profile is available only without issues.
+- [`agent_package.AgentPackageCheckerResult`](./nemo_fabric.agent_package.md#class-agentpackagecheckerresult): What the checker of one agent package load answered.
 - [`agent_package.AgentPackageDeclaredItem`](./nemo_fabric.agent_package.md#class-agentpackagedeclareditem): One thing a document declares, and what the load did with it.
 - [`agent_package.AgentPackageDigestCheck`](./nemo_fabric.agent_package.md#class-agentpackagedigestcheck): One lock entry and what the load checked about it.
 - [`agent_package.AgentPackageFetchReport`](./nemo_fabric.agent_package.md#class-agentpackagefetchreport): What one agent package fetch placed and what it left.

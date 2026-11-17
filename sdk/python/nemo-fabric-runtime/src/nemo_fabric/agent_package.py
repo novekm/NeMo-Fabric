@@ -140,6 +140,36 @@ class AgentPackageDigestCheck(FabricMapping):
     _json_fields = frozenset({"interface"})
 
 
+class AgentPackageCheckerResult(FabricMapping):
+    """What the checker of one agent package load answered.
+
+    Attributes:
+        decision: ``allow`` or ``deny``. A checker that failed is a ``deny``.
+        failure: Why the checker counts as failed: ``not_started``,
+            ``timed_out``, ``output_too_large``, ``unexpected_exit`` or
+            ``invalid_answer``. ``None`` when it answered as it must.
+        exit_code: The exit code of the checker. ``None`` when it was not
+            started, ran past the time limit, wrote more than it may, or was
+            ended by a signal.
+        detail: More about a failure: why the checker could not be started,
+            that it wrote more than it may, or else the end of what it wrote
+            to standard error.
+        answer: The JSON object the checker wrote. The order of its keys is
+            not kept, and a number is kept as a JSON number. Each read gives
+            a plain copy. ``None`` when the checker wrote no single JSON
+            object, was not started, ran past the time limit or wrote more
+            than it may.
+    """
+
+    decision: str
+    failure: str | None
+    exit_code: int | None
+    detail: str | None
+    answer: Mapping[str, Any] | None
+    _fields = frozenset({"decision", "failure", "exit_code", "detail", "answer"})
+    _json_fields = frozenset({"answer"})
+
+
 class AgentPackageReport(FabricMapping):
     """What one agent package load read, checked and mapped.
 
@@ -152,8 +182,8 @@ class AgentPackageReport(FabricMapping):
         package_dir: The package folder, absolute.
         base_dir: The base directory that relative config paths resolve against.
         outcome: ``ready`` when the report holds a config, ``stopped`` when a
-            required thing stopped the load, ``verified_only`` when no config
-            was given.
+            required thing stopped the load, ``denied`` when the checker did
+            not allow the start, ``verified_only`` when no config was given.
         if_unsupported: The setting used for a required thing whose status is
             ``not_mapped`` or ``not_met``.
         if_unverified: The setting used for a required thing whose status is
@@ -189,6 +219,10 @@ class AgentPackageReport(FabricMapping):
         config: The mapped configuration snapshot. Present only when
             ``outcome`` is ``ready``.
         config_sha256: The sha256 of the mapped config, for drift detection.
+            Present when ``outcome`` is ``ready`` or ``denied``.
+        checker_result: What the checker named by the ``checker`` option
+            answered, as an ``AgentPackageCheckerResult``, or ``None`` when no
+            checker was asked.
     """
 
     schema_version: str
@@ -210,6 +244,7 @@ class AgentPackageReport(FabricMapping):
     notes: Sequence[Mapping[str, Any]]
     config: _FabricConfigSnapshot | None
     config_sha256: str | None
+    checker_result: AgentPackageCheckerResult | None
     _fields = frozenset(
         {
             "schema_version",
@@ -231,9 +266,9 @@ class AgentPackageReport(FabricMapping):
             "notes",
             "config",
             "config_sha256",
+            "checker_result",
         }
     )
-
     @classmethod
     def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
         for field in ("package_dir", "base_dir", "outcome"):
@@ -243,6 +278,10 @@ class AgentPackageReport(FabricMapping):
         data["base_dir"] = Path(data["base_dir"])
         data.setdefault("adapter", None)
         data.setdefault("config_sha256", None)
+        result = data.get("checker_result")
+        data["checker_result"] = (
+            None if result is None else AgentPackageCheckerResult.from_mapping(result)
+        )
         data["declared"] = tuple(
             AgentPackageDeclaredItem.from_mapping(line)
             for line in data.get("declared", [])
@@ -267,7 +306,12 @@ class AgentPackageReport(FabricMapping):
 
         Raises:
             FabricConfigError: With code ``package_requirements_unmet`` when a
-                required thing stopped the load, and with code
+                required thing stopped the load. With code
+                ``package_check_denied`` when the checker did not allow the
+                start, and ``details["answer"]`` holds its answer. With code
+                ``package_check_failed`` when the checker failed, and
+                ``details["failure"]`` and ``details["detail"]`` say how.
+                With code
                 ``package_config_required`` when the package was loaded
                 without a config.
         """
@@ -284,6 +328,26 @@ class AgentPackageReport(FabricMapping):
                 stage=_STAGE,
                 code="package_requirements_unmet",
                 details={"stopped_by": list(self._data.get("stopped_by", ()))},
+            )
+        if outcome == "denied":
+            result = self["checker_result"]
+            if result["failure"] is None:
+                raise FabricConfigError(
+                    "The checker did not allow the agent package to start. The"
+                    " report's checker_result holds its answer.",
+                    stage=_STAGE,
+                    code="package_check_denied",
+                    details={"answer": result["answer"]},
+                )
+            raise FabricConfigError(
+                f"The checker of the agent package failed ({result['failure']}), so"
+                " the package may not start.",
+                stage=_STAGE,
+                code="package_check_failed",
+                details={
+                    key: result[key]
+                    for key in ("failure", "exit_code", "detail", "answer")
+                },
             )
         if config is None:
             raise FabricConfigError(
@@ -308,6 +372,8 @@ def load_agent_package(
     facts: Mapping[str, Any] | None = None,
     expected_lock_sha256: str | None = None,
     bindings: Mapping[str, str] | None = None,
+    checker: Sequence[str] | None = None,
+    checker_timeout_seconds: float | None = None,
 ) -> AgentPackageReport:
     """Read, check and map one agent package. Fetches nothing.
 
@@ -325,7 +391,8 @@ def load_agent_package(
     the lock to a digest held somewhere else, for example in a registry.
 
     The call is synchronous. With ``check_machine=True`` it can take a few
-    seconds; an async caller uses ``asyncio.to_thread``.
+    seconds, and with ``checker`` as long as the checker runs; an async caller
+    uses ``asyncio.to_thread``.
 
     Args:
         package_dir: The package folder.
@@ -382,10 +449,29 @@ def load_agent_package(
             accounts for nothing else that agent declares. Each such thing
             has a line of its own in the report. The mapped config does not
             hold the bindings. They are in the report.
+        checker: A program that decides whether the loaded package may
+            start: the program, then its arguments. ``None`` asks no
+            checker, and an empty list is refused. It is asked once, after
+            the package passed its own checks and was mapped, and it is
+            started with no shell. It gets the package folder in
+            ``NEMO_FABRIC_PACKAGE_DIR``, the path of a copy of the load
+            report without its config in ``NEMO_FABRIC_PACKAGE_REPORT`` and
+            the name of the entry document in ``NEMO_FABRIC_AGENT_NAME``.
+            Nothing is added to its arguments. Of your environment it keeps
+            operating-system variables such as ``PATH`` and ``HOME``, and no
+            other. It writes one JSON object to standard output. Exit code 0
+            with ``"decision": "allow"`` lets the package start, and exit
+            code 2 with ``"decision": "deny"`` does not. Anything else is a
+            deny, reported as a checker that failed. The report holds the
+            answer in ``checker_result``. A load the checker does not allow
+            has the outcome ``denied`` and no config.
+        checker_timeout_seconds: The time limit of the checker, in seconds.
+            ``None`` uses 30. A checker that runs longer is ended, and the
+            load is denied.
 
     Returns:
-        An ``AgentPackageReport``. Its ``outcome`` is ``ready``, ``stopped``
-        or ``verified_only``.
+        An ``AgentPackageReport``. Its ``outcome`` is ``ready``, ``stopped``,
+        ``denied`` or ``verified_only``.
 
     Raises:
         FabricConfigError: If the package is refused. ``stage`` is
@@ -415,6 +501,19 @@ def load_agent_package(
         options["expected_lock_sha256"] = expected_lock_sha256
     if bindings is not None:
         options["bindings"] = _option_mapping("bindings", bindings)
+    if checker is not None:
+        # One text is a sequence of characters, and is not a program with arguments.
+        if isinstance(checker, str) or not isinstance(checker, Sequence):
+            raise FabricConfigError(
+                "The agent package option checker must be a list: the program,"
+                " then its arguments",
+                stage=_STAGE,
+                code="package_options_invalid",
+                details={"subject": "checker"},
+            )
+        options["checker"] = list(checker)
+    if checker_timeout_seconds is not None:
+        options["checker_timeout_seconds"] = checker_timeout_seconds
     return AgentPackageReport.from_mapping(
         _load_report(package_dir, config, base_dir=base_dir, options=options)
     )

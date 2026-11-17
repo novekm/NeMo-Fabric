@@ -6,6 +6,7 @@
 mod adapter;
 mod bindings;
 mod called;
+mod checker;
 mod connector;
 mod definition;
 mod digest;
@@ -43,6 +44,7 @@ pub use model::{
 };
 pub use options::AgentPackageOptions;
 pub use report::{
-    AdapterReport, AgentPackageReport, DeclaredItem, DeclaredKind, DeclaredStatus, DigestCheck,
-    ItemEffect, MappingGap, ModelOrigin, ModelReport, PackageOutcome,
+    AdapterReport, AgentPackageReport, CheckerDecision, CheckerFailure, CheckerResult,
+    DeclaredItem, DeclaredKind, DeclaredStatus, DigestCheck, ItemEffect, MappingGap, ModelOrigin,
+    ModelReport, PackageOutcome,
 };
