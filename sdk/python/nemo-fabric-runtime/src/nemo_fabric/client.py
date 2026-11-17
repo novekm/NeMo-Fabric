@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import inspect
 import json
 import logging
 import math
@@ -15,13 +16,17 @@ import re
 import time
 from threading import Lock
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from nemo_fabric._collector_client import _AtofCollectorClient
-from nemo_fabric.agent_package import _PACKAGE_OPTIONS, load_agent_package
+from nemo_fabric.agent_package import (
+    _PACKAGE_OPTIONS,
+    AgentPackageReport,
+    load_agent_package,
+)
 from nemo_fabric.check import CheckReport, CheckRequest, _timeout_report
 from nemo_fabric.capabilities import _verify_adapter_descriptor
 from nemo_fabric.errors import (
@@ -59,6 +64,7 @@ from nemo_fabric.types import (
     ServiceHandle,
     ServiceReference,
     RuntimeStatusReport,
+    _plain,
 )
 
 try:
@@ -811,16 +817,34 @@ class Fabric:
         *,
         base_dir: str | os.PathLike[str] | None = None,
         options: Mapping[str, Any] | None = None,
+        check: Callable[
+            [AgentPackageReport], Mapping[str, Any] | Awaitable[Mapping[str, Any]]
+        ]
+        | None = None,
         session_ref: SessionRef | None = None,
         overrides: Mapping[str, Any] | None = None,
         streaming: bool = False,
     ) -> Runtime:
-        """Load an agent package and start its runtime.
+        """Load an agent package, ask an optional check, and start its runtime.
 
         This is ``load_agent_package`` followed by ``start_runtime`` in one
         call. The package is read, checked against its lock and mapped onto
-        ``config`` first. Nothing is started for a package that is refused or
-        for a load that stopped.
+        ``config`` first. Nothing is started for a package that is refused,
+        for a load that stopped, or for a check that does not allow the start.
+
+        ``check`` is the place for a decision before the start, such as a
+        policy check. It is not the health check that ``Fabric.check`` runs
+        on a runtime. It is called once with the load report, and only for a
+        package that passed its own checks and whose load did not stop. It
+        returns one mapping. The start goes ahead only when the mapping's
+        ``decision`` is the string ``"allow"``. Any other answer stops the
+        start, and so does a check that raises. NeMo Fabric reads nothing else
+        from the answer and runs no check of its own.
+
+        A checker program is named in ``options`` as ``checker``. The load
+        asks it first, and ``check`` is then called only when it allowed the
+        start. The report ``check`` receives holds its answer in
+        ``checker_result``.
 
         The load report is ``agent_package_report`` of the returned runtime.
         A load can continue past a required thing when its settings say so,
@@ -833,8 +857,15 @@ class Fabric:
                 ``metadata.name`` must equal the entry document's name.
             base_dir: Base directory for resolving relative config paths.
             options: The keyword options of ``load_agent_package`` by name,
-                for example ``entry``, ``variables`` and ``bindings``. These
-                are the members of the ``fabric-agent-ctl`` options file.
+                for example ``entry``, ``variables``, ``bindings`` and
+                ``checker``. These are the members of the ``fabric-agent-ctl``
+                options file.
+            check: Optional callable that decides whether the loaded package
+                may start. It takes the ``AgentPackageReport`` and returns a
+                mapping with ``decision`` set to ``"allow"`` or ``"deny"``.
+                The mapping can carry more, such as ``reasons``. A plain
+                function runs in a worker thread. A coroutine function is
+                awaited.
             session_ref: Native session to resume. Durable sessions
                 require retained storage and adapter support. Omission starts fresh.
             overrides: JSON-compatible overrides applied to every invocation
@@ -850,10 +881,17 @@ class Fabric:
         Raises:
             FabricConfigError: With stage ``agent_package`` and a stable code
                 if the package is refused, if ``options`` holds a name that is
-                not a load option (``package_options_invalid``), or if a
-                required thing stopped the load
-                (``package_requirements_unmet``). Also if ``start_runtime``
-                rejects its inputs.
+                not a load option (``package_options_invalid``), if a required
+                thing stopped the load (``package_requirements_unmet``), if the
+                checker or the check did not allow the start
+                (``package_check_denied``), or if the checker failed or the
+                check raised (``package_check_failed``, with the exception of
+                a check as the cause). A denied start has a plain copy of
+                the answer in ``details["answer"]``, or the name of
+                its type in ``details["answer_type"]`` when the answer of a
+                check is not JSON-compatible. A checker that failed is named
+                in ``details["failure"]``, with more in ``details["detail"]``.
+                Also if ``start_runtime`` rejects its inputs.
             FabricStateError: If active, failed, and pending runtimes fill the
                 client's 128-record limit (``runtime_limit_reached``).
             FabricNativeUnavailableError: If the native extension is not
@@ -883,8 +921,31 @@ class Fabric:
                 package_dir, config, base_dir=base_dir, **options
             )
         )
-        # Raises for a load that stopped.
+        # Raises for a load that stopped, so the check is asked only about a
+        # package that can start.
         mapped = report.to_config()
+        if check is not None:
+            try:
+                answer = await _call_blocking(lambda: check(report))
+                if inspect.isawaitable(answer):
+                    answer = await answer
+            except Exception as error:
+                raise FabricConfigError(
+                    f"The agent package check failed, so nothing was started: {error}",
+                    stage="agent_package",
+                    code="package_check_failed",
+                ) from error
+            decision = answer.get("decision") if isinstance(answer, Mapping) else None
+            # A string and nothing else: an object that only compares equal
+            # to "allow" is not an allow.
+            if not (isinstance(decision, str) and decision == "allow"):
+                raise FabricConfigError(
+                    "The agent package check did not allow the start, so nothing"
+                    " was started.",
+                    stage="agent_package",
+                    code="package_check_denied",
+                    details=_check_answer_details(answer),
+                )
         warned = [line["id"] for line in report.declared if line["effect"] == "warned"]
         if warned:
             logger.warning(
@@ -1516,6 +1577,16 @@ class Fabric:
                 code="native_unavailable",
             )
         return native
+
+
+def _check_answer_details(answer: Any) -> dict[str, Any]:
+    """Error details for a check's answer: a plain copy, or the name of its type."""
+
+    try:
+        return {"answer": _plain(answer)}
+    except Exception:
+        # Whatever the answer holds, the error stays the denial.
+        return {"answer_type": type(answer).__name__}
 
 
 def _config_json(config: FabricConfig) -> str:

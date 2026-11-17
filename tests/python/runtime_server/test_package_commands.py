@@ -364,6 +364,13 @@ def test_stopped_load_fails_validation_and_reports_what_stopped_it(
             id="bindings-not-an-object",
         ),
         pytest.param(
+            {"checker": []},
+            "validation_failed",
+            "package_options_invalid",
+            "checker",
+            id="checker-with-no-program",
+        ),
+        pytest.param(
             {"bindings": {"custom_tools.request_approval": "app.tools:ask"}},
             "validation_failed",
             "package_binding_undeclared",
@@ -411,6 +418,302 @@ def test_expected_lock_digest_from_the_options_file_refuses_a_swapped_lock(
     mock_client.assert_not_awaited()
 
 
+def test_checker_that_allows_sends_the_start_and_its_answer_is_in_the_report(
+    start, tmp_path, report_path, report_schema, mock_client, package_checker
+):
+    options_path = write_json(
+        tmp_path / "options.json",
+        {"checker": package_checker("allow"), "checker_timeout_seconds": 20},
+    )
+
+    assert cli.main([*start, "--package-options", str(options_path)]) == 0
+
+    mock_client.assert_awaited_once()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["outcome"] == "ready"
+    assert report["checker_result"] == {
+        "decision": "allow",
+        "failure": None,
+        "exit_code": 0,
+        "detail": None,
+        "answer": {
+            "decision": "allow",
+            "rules": ["approved-hooks"],
+            "checker": {"name": "test-checker", "version": "1"},
+        },
+    }
+    assert list(report_schema.iter_errors(report)) == []
+
+
+def test_checker_that_denies_sends_nothing_and_its_reasons_are_in_the_report(
+    start, tmp_path, report_path, report_schema, mock_client, capsys, package_checker
+):
+    options_path = write_json(
+        tmp_path / "options.json", {"checker": package_checker("deny")}
+    )
+
+    assert cli.main([*start, "--package-options", str(options_path)]) == 1
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["error"] == {
+        "code": "validation_failed",
+        "stage": "validation",
+        "message": "Fabric rejected the configuration. Cause: package_check_denied.",
+        "effects": "none",
+    }
+    assert "approved" not in captured.out
+    mock_client.assert_not_awaited()
+    assert stat.S_IMODE(report_path.stat().st_mode) == 0o600
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["outcome"] == "denied"
+    assert "config" not in report
+    assert report["checker_result"]["decision"] == "deny"
+    assert report["checker_result"]["failure"] is None
+    assert report["checker_result"]["answer"] == {
+        "decision": "deny",
+        "reasons": ["The skill release-notes is not on the approved list."],
+        "rules": ["approved-skills"],
+    }
+    assert list(report_schema.iter_errors(report)) == []
+
+
+@pytest.mark.parametrize(
+    "answer,limit,failure,exit_code,detail",
+    [
+        pytest.param(
+            "crash",
+            {},
+            "unexpected_exit",
+            1,
+            "RuntimeError: the policy folder is not readable",
+            id="crashes",
+        ),
+        pytest.param("no-json", {}, "invalid_answer", 0, None, id="prints-no-json"),
+        pytest.param(
+            "two-objects", {}, "invalid_answer", 0, None, id="prints-two-objects"
+        ),
+        pytest.param(
+            "deny-with-exit-0", {}, "invalid_answer", 0, None, id="denies-with-exit-0"
+        ),
+        # This checker sleeps for a day after it wrote. With a time limit of a
+        # day, the command returns only because the write limit ended it.
+        pytest.param(
+            "too-much-output",
+            {"checker_timeout_seconds": 86400},
+            "output_too_large",
+            None,
+            "the checker wrote more than 1048576 bytes",
+            id="writes-more-than-it-may",
+        ),
+        pytest.param(
+            "too-much-error-text-then-allow",
+            {},
+            "output_too_large",
+            None,
+            "the checker wrote more than 1048576 bytes",
+            id="writes-more-than-it-may-and-then-allows",
+        ),
+        # Only this checker is waited for, so only it gets a short limit. It
+        # sleeps for a day, so the command returns only because it was ended.
+        pytest.param(
+            "hang",
+            {"checker_timeout_seconds": 0.5},
+            "timed_out",
+            None,
+            None,
+            id="runs-past-the-time-limit",
+        ),
+    ],
+)
+def test_checker_that_fails_sends_nothing_and_the_report_says_how(
+    start,
+    tmp_path,
+    report_path,
+    report_schema,
+    mock_client,
+    capsys,
+    package_checker,
+    answer,
+    limit,
+    failure,
+    exit_code,
+    detail,
+):
+    options_path = write_json(
+        tmp_path / "options.json", {"checker": package_checker(answer), **limit}
+    )
+
+    assert cli.main([*start, "--package-options", str(options_path)]) == 1
+
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    assert response["error"]["code"] == "validation_failed"
+    assert response["error"]["message"].endswith("Cause: package_check_failed.")
+    assert response["error"]["effects"] == "none"
+    # What the checker wrote is in the report file and nowhere else.
+    assert "policy folder" not in captured.out + captured.err
+    mock_client.assert_not_awaited()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["outcome"] == "denied"
+    assert "config" not in report
+    result = report["checker_result"]
+    assert result["decision"] == "deny"
+    assert result["failure"] == failure
+    assert result["exit_code"] == exit_code
+    if detail is None:
+        assert result["detail"] is None
+    else:
+        assert result["detail"].endswith(detail)
+    assert list(report_schema.iter_errors(report)) == []
+
+
+def test_package_checker_flag_names_the_checker(
+    start, report_path, mock_client, capsys, package_checker
+):
+    denied = [*start, "--package-checker", json.dumps(package_checker("deny"))]
+    assert cli.main(denied) == 1
+
+    response = json.loads(capsys.readouterr().out)
+    assert response["error"]["message"].endswith("Cause: package_check_denied.")
+    mock_client.assert_not_awaited()
+
+    allowed = [*start, "--package-checker", json.dumps(package_checker("allow"))]
+    assert cli.main(allowed) == 0
+
+    mock_client.assert_awaited_once()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["checker_result"]["decision"] == "allow"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("/opt/policy/bin/check-package", id="not-json"),
+        pytest.param('"/opt/policy/bin/check-package"', id="one-text"),
+        pytest.param("[]", id="empty-list"),
+        pytest.param('["/opt/policy/bin/check-package", 3]', id="a-number"),
+        pytest.param('{"program": "/opt/policy/bin/check-package"}', id="an-object"),
+    ],
+)
+def test_package_checker_flag_that_is_not_a_list_of_text_is_refused(
+    start, report_path, mock_client, capsys, value
+):
+    assert cli.main([*start, "--package-checker", value]) == 1
+
+    response = json.loads(capsys.readouterr().out)
+    assert response["error"]["code"] == "invalid_request"
+    assert response["error"]["effects"] == "none"
+    # The package was not read: no report was written.
+    assert not report_path.exists()
+    mock_client.assert_not_awaited()
+
+
+def test_checker_named_by_the_flag_and_by_the_options_file_is_refused(
+    start, tmp_path, report_path, mock_client, capsys, package_checker
+):
+    options_path = write_json(
+        tmp_path / "options.json", {"checker": package_checker("allow")}
+    )
+    arguments = [
+        *start,
+        "--package-options",
+        str(options_path),
+        "--package-checker",
+        json.dumps(package_checker("allow")),
+    ]
+
+    assert cli.main(arguments) == 1
+
+    response = json.loads(capsys.readouterr().out)
+    assert response["error"]["code"] == "invalid_request"
+    assert not report_path.exists()
+    mock_client.assert_not_awaited()
+
+
+def test_checker_is_not_asked_about_a_package_that_cannot_start(
+    start,
+    tmp_path,
+    report_path,
+    bridge_agent,
+    bridge_files,
+    bridge_package,
+    mock_client,
+    capsys,
+    package_checker,
+):
+    record = tmp_path / "given.json"
+    arguments = [
+        *start,
+        "--package-checker",
+        json.dumps(package_checker("allow", record)),
+    ]
+
+    # A required hook the test adapter does not take stops the load.
+    bridge_agent["hooks"] = {"guard": {"source": "./hooks/guard"}}
+    write_package(bridge_package, bridge_agent, bridge_files)
+    assert cli.main(arguments) == 1
+    response = json.loads(capsys.readouterr().out)
+    assert response["error"]["message"].endswith("Cause: package_requirements_unmet.")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["checker_result"] is None
+
+    # A package that fails its own checks is refused.
+    skill = bridge_package / "skills" / "notes" / "SKILL.md"
+    skill.write_bytes(skill.read_bytes() + b"x")
+    assert cli.main(arguments) == 1
+    response = json.loads(capsys.readouterr().out)
+    assert response["error"]["message"].endswith("Cause: package_digest_mismatch.")
+
+    assert not record.exists()
+    mock_client.assert_not_awaited()
+
+
+def test_checker_gets_no_argument_and_nothing_of_the_config(
+    start,
+    tmp_path,
+    bridge_config_path,
+    report_path,
+    mock_client,
+    package_checker,
+):
+    secret = "a-token-only-the-harness-may-see"
+    os.environ["MODEL_API_KEY"] = secret
+    config = json.loads(bridge_config_path.read_text(encoding="utf-8"))
+    config["environment"] = {"provider": "local", "env": {"NOTES_TOKEN": secret}}
+    write_json(bridge_config_path, config)
+    record = tmp_path / "given.json"
+    checker = package_checker("allow", record)
+
+    assert cli.main([*start, "--package-checker", json.dumps(checker)]) == 0
+
+    # The config that was sent holds the value. The checker saw none of it.
+    assert secret in json.dumps(mock_client.await_args.args[0])
+    assert secret not in record.read_text(encoding="utf-8")
+    given = json.loads(record.read_text(encoding="utf-8"))
+    assert given["arguments"] == checker[2:]
+    environment = given["environment"]
+    assert environment["NEMO_FABRIC_AGENT_NAME"] == AGENT
+    assert Path(environment["NEMO_FABRIC_PACKAGE_DIR"]).name == "package"
+    assert "MODEL_API_KEY" not in environment
+    assert "FABRIC_HOST_SOCKET" not in environment
+    # It read the report of this load, before its own answer was added.
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert {**given["report"], "checker_result": report["checker_result"]} == report
+    assert given["report"]["checker_result"] is None
+    assert not Path(environment["NEMO_FABRIC_PACKAGE_REPORT"]).exists()
+
+
+def test_no_checker_named_asks_nothing_and_the_report_says_so(
+    start, report_path, mock_client
+):
+    assert cli.main(start) == 0
+
+    mock_client.assert_awaited_once()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["outcome"] == "ready"
+    assert report["checker_result"] is None
+
+
 def test_every_package_option_is_an_option_the_schema_lists(repo_root):
     schema = json.loads(
         (repo_root / "schemas/sdk/agent-package-options.schema.json").read_text(
@@ -426,6 +729,9 @@ def test_every_package_option_is_an_option_the_schema_lists(repo_root):
     [
         pytest.param(["--package-options", "options.json"], id="options"),
         pytest.param(["--report", "report.json"], id="report"),
+        pytest.param(
+            ["--package-checker", '["/opt/policy/bin/check-package"]'], id="checker"
+        ),
         pytest.param(
             ["--package-options", "options.json", "--report", "report.json"],
             id="options-and-report",
@@ -515,7 +821,7 @@ def test_package_reports_platform_unsupported_without_loading(
 
 
 async def test_package_start_runs_through_real_command_processes(
-    blocking_adapter_config, tmp_path
+    blocking_adapter_config, tmp_path, package_checker
 ):
     # A short folder under /tmp keeps the socket path inside the platform limit.
     with tempfile.TemporaryDirectory(prefix="fh-package-", dir="/tmp") as directory:
@@ -587,6 +893,22 @@ async def test_package_start_runs_through_real_command_processes(
             refused = await call("start", *package_flags)
             assert refused["error"]["code"] == "invalid_request"
             assert not report_path.exists()
+
+            # A checker that denies stops the real command before any start.
+            denied = await call(
+                "start",
+                *package_flags,
+                "--report",
+                str(report_path),
+                "--package-checker",
+                json.dumps(package_checker("deny")),
+            )
+            assert denied["error"]["code"] == "validation_failed"
+            assert denied["error"]["message"].endswith("Cause: package_check_denied.")
+            assert denied["error"]["effects"] == "none"
+            denial = json.loads(report_path.read_text(encoding="utf-8"))
+            assert denial["outcome"] == "denied"
+            assert denial["checker_result"]["answer"]["rules"] == ["approved-skills"]
 
             started = await call("start", *package_flags, "--report", str(report_path))
             assert started["status"] == "succeeded", started
