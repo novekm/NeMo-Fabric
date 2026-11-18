@@ -85,6 +85,9 @@ INHERITED_ENV_NAMES = {
     "APPDATA",
     "CLAUDE_CONFIG_DIR",
     "COMSPEC",
+    # The runtime id NeMo Fabric gives the adapter host, so a hook can name the run it checks, such as in the
+    # x-nemo-run-id header of a NeMo Guardrails hooks server check, for the owner of the run to stop it.
+    "FABRIC_RUNTIME_ID",
     "HOME",
     "HTTP_PROXY",
     "HTTPS_PROXY",
