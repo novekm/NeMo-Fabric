@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 use super::adapter::AdapterSupport;
-use super::bindings::{AGENTS, CUSTOM_TOOLS, binding_key, binds_called_agent};
+use super::bindings::{AGENTS, CUSTOM_TOOLS, LIMITS, binding_key, binds_called_agent};
 use super::connector::{self, CarriedConnector};
 use super::digest::bytes_digest;
 use super::error::{PackageError, PackageErrorCode, PackageResult};
@@ -796,7 +796,20 @@ impl<'a> Mapper<'a> {
                         Some(LimitOutcome::NotMapped { gap, detail }) => {
                             item.not_mapped(*gap, detail.clone())
                         }
-                        None => item.not_mapped(MappingGap::NoFabricField, enforced_elsewhere(key)),
+                        None => match self.options.bindings.get(&format!("{LIMITS}.{key}")) {
+                            // The agent that runs: its limits bound the agents it calls too.
+                            Some(target) => item.bound(
+                                target,
+                                format!(
+                                    "{} applies, enforced by the caller's target. {}",
+                                    limits.get(key).map(Value::to_string).unwrap_or_default(),
+                                    enforced_elsewhere(key)
+                                ),
+                            ),
+                            _ => {
+                                item.not_mapped(MappingGap::NoFabricField, enforced_elsewhere(key))
+                            }
+                        },
                     };
                 }
                 self.items.push(item);
@@ -3403,6 +3416,45 @@ mod tests {
                 "agent:/limits/max_total_tokens"
             ]
         );
+    }
+
+    #[test]
+    fn a_binding_names_who_enforces_a_limit_fabric_cannot_hold_and_keeps_its_value() {
+        let reading = reading(agent(json!({
+            "limits": {"max_parallel": 2, "max_depth": 1, "max_total_tokens": 100000}
+        })));
+        let options = AgentPackageOptions {
+            bindings: BTreeMap::from([
+                ("limits.max_depth".to_string(), "the harness".to_string()),
+                (
+                    "limits.max_total_tokens".to_string(),
+                    "gateway:tokens".to_string(),
+                ),
+            ]),
+            ..AgentPackageOptions::default()
+        };
+
+        let mut mapped = map_with(&reading, base(json!({})), &everything(), &options);
+
+        let depth = item(&mapped, "agent:/limits/max_depth");
+        assert_eq!(depth.status, DeclaredStatus::Bound);
+        assert_eq!(depth.bound_to.as_deref(), Some("the harness"));
+        assert!(depth.detail.as_deref().unwrap().starts_with("1 applies"));
+        let tokens = item(&mapped, "agent:/limits/max_total_tokens");
+        assert_eq!(tokens.bound_to.as_deref(), Some("gateway:tokens"));
+        assert!(
+            tokens
+                .detail
+                .as_deref()
+                .unwrap()
+                .starts_with("100000 applies")
+        );
+        // A limit with no binding still names who must enforce it, and still stops the load.
+        let parallel = item(&mapped, "agent:/limits/max_parallel");
+        assert_eq!(parallel.status, DeclaredStatus::NotMapped);
+        let (outcome, stopped) = stopped_by(&mut mapped);
+        assert_eq!(outcome, PackageOutcome::Stopped);
+        assert_eq!(stopped, vec!["agent:/limits/max_parallel"]);
     }
 
     #[test]

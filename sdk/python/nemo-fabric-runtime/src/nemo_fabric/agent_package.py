@@ -443,7 +443,10 @@ def load_agent_package(
             thing. A key is ``custom_tools.<name>`` or ``agents.<name>`` for
             the agent that runs. For a thing a called agent declares, the
             same follows that agent's key, as in
-            ``agents.<name>.custom_tools.<tool>``. A value is one line of
+            ``agents.<name>.custom_tools.<tool>``. A key ``limits.max_depth``,
+            ``limits.max_parallel`` or ``limits.max_total_tokens`` names who
+            enforces that limit of the agent that runs, which NeMo Fabric
+            cannot hold; its line keeps the number. A value is one line of
             text that names your target, for example a Python reference or a
             registered name. The loader never imports, resolves or runs it.
             A bound thing has the status ``bound`` and does not stop the
