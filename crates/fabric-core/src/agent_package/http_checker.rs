@@ -172,6 +172,15 @@ pub(super) fn start_facts(report: &AgentPackageReport, enforcers_present: &[Stri
                 .push(json!({"id": entry.address, "required": required, "enforcers": enforcers}));
         }
     }
+    // The models the package declares, then the model the config binds the run to: the one that
+    // will really run. Both are in `models`, so a rule judges each; the two members say which is which.
+    let declared_models = models.clone();
+    let bound_model = bound_model(report);
+    if let Some(bound) = &bound_model
+        && !models.iter().any(|known| known == bound)
+    {
+        models.push(bound.clone());
+    }
     json!({
         "hook_event_name": EVENT,
         "agent_name": report.entry.name,
@@ -179,9 +188,34 @@ pub(super) fn start_facts(report: &AgentPackageReport, enforcers_present: &[Stri
         "agent_digest": format!("sha256:{}", report.lock.sha256),
         "parts": parts,
         "models": models,
+        "declared_models": declared_models,
+        "bound_model": bound_model,
         "policies": policies,
         "enforcers_present": enforcers_present,
     })
+}
+
+/// The model the config binds the run to, as `<provider>::<model>`, the way a package names a
+/// model. None when the config names no model and the harness picks its own.
+fn bound_model(report: &AgentPackageReport) -> Option<String> {
+    let model = report
+        .model
+        .model
+        .as_deref()
+        .filter(|model| !model.is_empty())?;
+    Some(
+        match report
+            .model
+            .provider
+            .as_deref()
+            .filter(|provider| !provider.is_empty())
+        {
+            Some(provider) if !model.starts_with(&format!("{provider}::")) => {
+                format!("{provider}::{model}")
+            }
+            _ => model.to_string(),
+        },
+    )
 }
 
 /// A source as the package states it: `git::<url>//<subpath>` for a git
