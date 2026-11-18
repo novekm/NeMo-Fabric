@@ -21,7 +21,7 @@ Know these limits before you start:
 
 ## What a Package Holds
 
-The package format is the Open Agentic Declarative Language (OADL), version 0.4.0. That version of the format is a draft. NeMo Fabric carries the format's JSON schemas and checks every document against them.
+The package format is the Open Agentic Declarative Language (OADL), version 0.4.0. NeMo Fabric carries the format's JSON schemas and checks every document against them.
 
 Each document names its schema in `$schema`. The loader accepts only the schema ids of the files it carries, for this one version of the format. A document that names another id is refused with `package_schema_version`, and the message gives the id the loader expects. The id is part of the document's bytes, so a package written for another id needs new lock digests.
 
