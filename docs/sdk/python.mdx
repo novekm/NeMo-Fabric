@@ -185,6 +185,28 @@ let inspection = inspect_adapter_config(config, &descriptor, target.as_ref(), tr
 
 `AdapterInspection` and `AdapterCompatibilityIssue` are now public documented Rust types, marked `#[non_exhaustive]`. Rust callers explicitly pass `true` for structured compatibility issues, or `false` for exception-based rejection. Both modes reject malformed inputs. No file-based inspection wrapper is provided. `doctor` continues to diagnose resolved deployment plans.
 
+## Load an Agent Package
+
+An agent package is a folder with an `agent.json`, a lock file that pins every part by digest, and the parts beside it. `load_agent_package(package_dir, config)` checks the package against its lock, maps the agent onto your `FabricConfig`, and returns an `AgentPackageReport`. The report lists every declared thing with its status and every lock entry with its digest. Pass `report.to_config()` to `Fabric.plan`, `Fabric.run`, or `Fabric.start_runtime` as you would any other config.
+
+```python
+from nemo_fabric import Fabric, load_agent_package
+
+report = load_agent_package("/sandbox/agent", config, base_dir="/sandbox")
+runtime = await Fabric().start_runtime(report.to_config(), base_dir=report.base_dir)
+```
+
+`Fabric.start_agent_package(package_dir, config)` does both steps in one call and returns the active `Runtime`. The runtime holds the load report as `runtime.agent_package_report`. The `options` argument holds the load options by name.
+
+```python
+async with await Fabric().start_agent_package(
+    "/sandbox/agent", config, base_dir="/sandbox", options={"variables": {"max_turns": 8}}
+) as runtime:
+    result = await runtime.invoke(input="Draft the notes for release 2.4.")
+```
+
+The loader fetches nothing: the package must already be resolved and locked. Refer to [Agent Packages](agent-packages.mdx) for the field mapping, the report, the error codes, and the two settings that decide whether an unmet requirement stops the load.
+
 ## SDK Subsections
 
 <a id="execution-model"></a>
@@ -231,6 +253,8 @@ let inspection = inspect_adapter_config(config, &descriptor, target.as_ref(), tr
 <a id="recover-a-buffered-invocation-result"></a>
 
 - [Results and Errors](results-and-errors.mdx)
+
+- [Agent Packages](agent-packages.mdx)
 
 <a id="runtime-health"></a>
 <a id="gateway-service-health"></a>

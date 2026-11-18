@@ -164,6 +164,8 @@ NeMo Fabric maps the following into the harness:
   custom `middleware`, and the JSON-serializable Deep Agents `interrupt_on` and
   `subagents` options. The descriptor schema rejects unknown settings and fields
   before runtime start.
+- The called agents of an agent package become declarative subagents. Refer to
+  [Called Agents From an Agent Package](#called-agents-from-an-agent-package).
 
 ### Harness Settings
 
@@ -397,6 +399,68 @@ The configured `runtime.max_turns` limit applies as `recursion_limit` to the
 main local graph. Declarative subagent graphs retain their Deep Agents limits,
 and Agent Protocol subagents manage their own recursion limit in the remote
 service.
+
+### Called Agents From an Agent Package
+
+An [agent package](https://github.com/NVIDIA/NeMo-Fabric/blob/main/docs/sdk/agent-packages.mdx)
+can name agents that its agent calls. When NeMo Fabric loads such a package for
+this adapter, it writes the called agents into the root key
+`nemo_fabric.agents.v1` of the config. The adapter descriptor declares the key
+under `extension_schemas.agent_config`, and the adapter turns each entry into
+one declarative subagent.
+
+The following config fragment is what a load writes for a video producer that
+calls a reviewer and a captioner:
+
+```json
+{
+  "nemo_fabric.agents.v1": {
+    "captioner": {
+      "description": "Writes captions for a finished video from its transcript.",
+      "instructions": "Write captions from the transcript you are given."
+    },
+    "reviewer": {
+      "description": "Reviews a rendered video against the checklist and reports what fails.",
+      "instructions": "Check each item of the checklist and report every item that fails."
+    }
+  }
+}
+```
+
+| Entry | Deep Agents subagent |
+| --- | --- |
+| The entry's name | `name` |
+| `description` | `description` |
+| `instructions` | `system_prompt` |
+
+The called agents follow the subagents of
+`harness.settings.deepagents.subagents`, in name order. A called agent runs on
+the main agent's model, like any declarative subagent that sets no `model`.
+It has the built-in Deep Agents tools and none of the main agent's MCP tools.
+Deep Agents gives a subagent the main agent's tools unless the subagent lists
+its own, so the adapter gives each called agent an empty `tools` list. A called
+agent keeps its own connectors, and this adapter does not pass those.
+`tools.enabled` and `tools.blocked` apply to a called agent.
+
+A name holds lowercase letters, digits, `_` and `-`, and does not start with
+`-`. That is the name rule of the package format, and the descriptor refuses
+any other name at planning. A called agent that has the name of a configured
+subagent fails runtime start, and the error names it. A called agent named
+`general-purpose` takes the place of the built-in Deep Agents subagent of that
+name.
+
+The key is closed. An entry holds a description and instructions and nothing
+else, so a package load reports the following for a called agent and does not
+pass them to Deep Agents:
+
+- Its turn limit. Deep Agents has no turn limit for a subagent.
+- Its skills. Deep Agents reads a skill source through its backend, as a folder
+  that holds skill folders. A load gives the absolute path of one skill's own
+  folder, and Deep Agents finds no skill there.
+- Its own model, connectors, hooks, plugins, custom tools and called agents.
+
+Each of these is a line in the load report. A required one stops the load
+unless the caller lets the load continue.
 
 The normalized result includes the final response, buffered messages and
 per-step events, LangGraph thread id, token usage (and cost when the provider

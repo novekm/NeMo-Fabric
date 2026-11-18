@@ -40,6 +40,7 @@ NAVIGATION = ROOT / "docs" / "index.yml"
 MODULE_SLUGS = {
     "nemo_fabric.client": "/reference/api/python-library-reference/client",
     "nemo_fabric.capabilities": "/reference/api/python-library-reference/capabilities",
+    "nemo_fabric.agent_package": "/reference/api/python-library-reference/agent-package",
     "nemo_fabric.check": "/reference/api/python-library-reference/check",
     "nemo_fabric.runtime": "/reference/api/python-library-reference/runtime",
     "nemo_fabric.service": "/reference/api/python-library-reference/service",

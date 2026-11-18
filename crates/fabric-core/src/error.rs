@@ -180,6 +180,16 @@ pub enum FabricError {
         /// Compatibility failure.
         reason: String,
     },
+    /// An agent package was refused while it was read, checked or mapped.
+    #[error("agent package {code} at `{subject}`: {message}")]
+    AgentPackage {
+        /// Stable machine-readable refusal code.
+        code: String,
+        /// The thing the refusal names: a path, a lock address, a variable or a field.
+        subject: String,
+        /// Human-readable explanation.
+        message: String,
+    },
     /// A requested schema is not known.
     #[error("unknown schema `{schema}`; available schemas: {available:?}")]
     UnknownSchema {

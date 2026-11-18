@@ -230,6 +230,26 @@ configuration boundary. NeMo Fabric rejects an
 asynchronous subagent when `tools.enabled` or `tools.blocked` is configured
 because a local tools policy cannot gate remote tools.
 
+### Run the Called Agents of an Agent Package
+
+An [agent package](../../sdk/agent-packages.mdx) can name agents that its agent
+calls. When NeMo Fabric loads such a package for this adapter, each called
+agent becomes one declarative subagent: its name, its `description`, and its
+`instructions` as the subagent's `system_prompt`. The load writes them into the
+root key `nemo_fabric.agents.v1` of the config, which the adapter descriptor
+declares.
+
+The called agents follow the subagents of
+`harness.settings.deepagents.subagents`, and `tools.enabled` and
+`tools.blocked` apply to them. A called agent has the built-in Deep Agents
+tools and none of the main agent's MCP tools, because a called agent keeps its
+own connectors. A called agent that has the name of a configured subagent
+fails runtime start.
+
+The adapter takes nothing else for a called agent. Its turn limit, its skills,
+its own model and its other parts are not passed to Deep Agents. The load
+report has a line for each of them. Refer to the adapter guide for the reasons.
+
 ### Add Custom Python Tools and Middleware
 
 The configuration names custom LangChain code that is already installed in the

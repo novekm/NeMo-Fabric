@@ -16,6 +16,7 @@ SPDX-License-Identifier: Apache-2.0
 | `check --agent NAME --runtime-id ID [--live \| --active \| --ready]` | Check the selected runtime through `Fabric.check()` |
 | `start --agent NAME --config FILE [--session-ref FILE]` | `Fabric.start_runtime(config, base_dir=..., session_ref=...)` |
 | `start --agent NAME --request FILE` | Start from one object containing `config` and optional `session_ref` |
+| `start --agent NAME --config FILE --package DIR --report FILE [--package-options FILE]` | Load an agent package with the config, write the load report, then start with the mapped config |
 | `invoke --agent NAME --runtime-id ID --input FILE` | `Runtime.invoke(input=...)` |
 | `invoke --agent NAME --runtime-id ID --request FILE` | `Runtime.invoke(request=RunRequest(...))` |
 | `stop --agent NAME --runtime-id ID` | `Runtime.stop()` |
@@ -64,6 +65,52 @@ The OpenShell provider uses `start --request -` to carry both fields in one
 stdin object. This form is mutually exclusive with `--config` and `--session-ref`.
 Recovery warnings remain in the runtime result. Inspect uncertain state before
 sending a new invoke request with `acknowledge_recovery: true`.
+
+## Start From An Agent Package
+
+`start --package DIR` loads an agent package before it starts the runtime. An agent package is a folder with `agent.json` or `agent-definition.json`, the lock file `oadl.lock.json`, and the parts. The package must already be resolved and locked. The command fetches nothing and installs nothing.
+
+```sh
+fabric-agent-ctl start --agent release-notes-agent \
+  --config /sandbox/config.json --package /sandbox/agent \
+  --package-options /sandbox/package-options.json --report /sandbox/package-report.json
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--package DIR` | Load this package with the config from `--config`, then send the existing start request with the mapped config. Requires `--config` and `--report`. Not allowed with `--request`. |
+| `--report FILE` | Write the load report to this file before the start request is sent. Required with `--package`, and not allowed without it. |
+| `--package-options FILE` | One JSON object with the load options: `entry`, `variables`, `instruction_mode`, `if_unsupported`, `if_unverified`, `check_machine`, `facts`, `expected_lock_sha256` and `bindings`. The schema is `sdk/agent-package-options`. Requires `--package`. |
+
+The options file is one JSON object, for example:
+
+```json
+{
+  "variables": {"max_turns": 8},
+  "if_unsupported": "warn",
+  "expected_lock_sha256": "<the lock.sha256 of a report you keep>"
+}
+```
+
+The config in `--config` is a complete `FabricConfig`. It holds what a package has no field for, such as the adapter, the model endpoint and the environment. `--agent` and the config's `metadata.name` must both equal the name of the package's entry document. The base directory is the socket's folder, the same one the server uses.
+
+The lock file sits in the package folder, so the check shows that the parts match that lock and no more. To refuse a package whose lock is not the one you recorded, put the digest you hold in the options file as `expected_lock_sha256`. A lock with another digest gives the cause `package_lock_digest_mismatch`.
+
+The config in `--config` can let the package choose the model: leave `models.default` out and name each `models` entry with the text an agent gives as its default model, such as `ollama::mistral-small3.2:24b`. The loader moves the entry the agent declares to `models.default`.
+
+A plugin, a hook or a called agent goes to the adapter under a root key of the mapped config, such as `nemo_fabric.plugins.v1`, when the adapter's descriptor declares that key. On another adapter it stops the load. A custom tool stops the load unless the config holds a `tools.definitions` entry under its name on an adapter that accepts one, or the options file binds it. A called agent can be bound too. `bindings` maps the place of the declared thing, such as `custom_tools.request_approval` or `agents.captioner`, to one line of text that names your own target. The report file then lists the thing with the status `bound` and the target in `bound_to`. The mapped config does not hold the bindings. A binding that names nothing the package declares gives the cause `package_binding_undeclared`.
+
+The package is read and checked in the short-lived command process. The command then sends the same start request the server already accepts. The server and the wire protocol do not change. The check happens once, before the start. The server starts the harness later from the same folders. This is a load-time check. It is not tamper protection for the life of the runtime.
+
+Stdout is unchanged: one response envelope. On success `result` is the runtime handle. When the package is refused, or a required thing stops the load, the response is `validation_failed` at stage `validation`, with `changed: false`, `effects: "none"`, and the package code as the cause, for example `Fabric rejected the configuration. Cause: package_digest_mismatch.` A stopped load has the cause `package_requirements_unmet`. Nothing is sent to the server. No path, value or message is printed.
+
+The report file is required because stdout names nothing. With `if_unsupported` set to `warn`, a start goes ahead while the report lists each declared thing that was warned about or left out, such as a hook or a policy. Without the file those would be dropped with nothing said, so `--package` without `--report` is `invalid_request` and the package is not read.
+
+The command loads and starts in one step. With `if_unsupported` set to `warn`, the start request is sent as soon as the report is written, so nothing can read the report in between. To decide before the start, call `load_agent_package` in the sandbox first, read its report, and pass that report's `lock.sha256` as `expected_lock_sha256` in the options file. The command then starts only the package you looked at. Otherwise read the report file after the start, and send `stop` when it lists something you cannot do without.
+
+The report file carries the details. It is created or replaced with mode `0600`. It holds the load report without its `config` member; `config_sha256` stays. That file follows the `sdk/agent-package-report` schema. When the load stops, the report lists the declared things that stopped it under `stopped_by`.
+
+When the package is refused, the file is not a load report and does not follow that schema. It holds `{"schema_version": "fabric.agent_package_refusal/v1alpha1", "outcome": "refused", "error": {"code": ..., "subject": ..., "message": ...}}`. Read `outcome` first. If the file cannot be written, the command fails with `invalid_request` and sends nothing. The mapped config must fit the 512 KiB request limit; a larger one gives `request_too_large`.
 
 ## Runtime Ownership
 

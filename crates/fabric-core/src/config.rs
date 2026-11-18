@@ -3689,6 +3689,25 @@ pub fn resolve_diagnostic_plan_from_config_with_adapter_directories(
     )
 }
 
+/// The adapter ids that descriptor discovery finds for a config, in sorted order.
+///
+/// Discovery looks where planning looks: the bundled adapters, the given
+/// adapter directories and the config's `discovery.local_paths`.
+pub(crate) fn discovered_adapter_ids(
+    config: &FabricConfig,
+    context: &ResolveContext,
+    adapter_directories: &[PathBuf],
+) -> Result<Vec<String>> {
+    let base_dir = std::path::absolute(&context.base_dir)
+        .map(normalize_path)
+        .map_err(|source| FabricError::ResolveBaseDirectory {
+            path: context.base_dir.clone(),
+            source,
+        })?;
+    let registry = DescriptorRegistry::from_config(config, &base_dir, adapter_directories)?;
+    Ok(registry.adapters.keys().cloned().collect())
+}
+
 fn resolve_run_plan_from_config_with_adapter_directories_mode(
     config: FabricConfig,
     context: ResolveContext,

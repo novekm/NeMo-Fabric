@@ -4,6 +4,10 @@
 """Python SDK surface for NeMo Fabric."""
 
 from nemo_fabric.client import Fabric
+from nemo_fabric.agent_package import AgentPackageDeclaredItem
+from nemo_fabric.agent_package import AgentPackageDigestCheck
+from nemo_fabric.agent_package import AgentPackageReport
+from nemo_fabric.agent_package import load_agent_package
 from nemo_fabric.check import CheckReport, CheckRequest
 from nemo_fabric.capabilities import AdapterCapabilityProfile
 from nemo_fabric.capabilities import AdapterCompatibilityIssue
@@ -103,6 +107,9 @@ __all__ = [
     "AdapterCompatibilityIssue",
     "AdapterInspection",
     "AdapterInfo",
+    "AgentPackageDeclaredItem",
+    "AgentPackageDigestCheck",
+    "AgentPackageReport",
     "ArtifactManifest",
     "ArtifactRef",
     "DoctorCheck",
@@ -188,4 +195,5 @@ __all__ = [
     "ToolDefinitionConfig",
     "WorkflowConfig",
     "inspect_adapter",
+    "load_agent_package",
 ]

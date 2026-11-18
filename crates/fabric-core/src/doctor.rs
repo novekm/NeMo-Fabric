@@ -425,7 +425,7 @@ fn adapter_kind_name(adapter_kind: AdapterKind) -> &'static str {
     }
 }
 
-fn command_available(binary: &str) -> bool {
+pub(crate) fn command_available(binary: &str) -> bool {
     let path = Path::new(binary);
     if path.components().count() > 1 {
         return explicit_command_available(path);

@@ -118,6 +118,9 @@ DEEPAGENTS_BUILTIN_TOOL_NAMES = frozenset(
         "list_async_tasks",
     }
 )
+# Root extension an agent package load writes: the package's called agents by name.
+# The descriptor declares its schema, so planning has checked every entry.
+PACKAGE_AGENTS_EXTENSION = "nemo_fabric.agents.v1"
 # Appended to the fault that poisoned Relay's scope stack, and then reported on every
 # later turn of the same runtime so none of them can look telemetry-clean. Deliberately
 # does not claim later turns are untraced: the Relay middleware is attached to the
@@ -1084,6 +1087,7 @@ async def build_agent_kwargs(
     kwargs.update(
         {key: extra[key] for key in DEEPAGENTS_PASSTHROUGH_KEYS if key in extra}
     )
+    kwargs["subagents"] = _with_package_agents(config, kwargs.get("subagents"))
     # Custom middleware runs inside an entry policy check, so a wrapper that runs a
     # tool itself cannot skip the policy, and before the final policy check, so a
     # wrapper that rewrites a call is checked again. Relay is appended later, so
@@ -1169,6 +1173,43 @@ def _validated_deepagents_settings(extra: Any) -> dict[str, Any]:
                     "fields are ['ref', 'settings']."
                 )
     return dict(extra)
+
+
+def _with_package_agents(config: AgentConfig, subagents: Any) -> Any:
+    """Add an agent package's called agents after the configured subagents."""
+
+    agents = config.extensions.get(PACKAGE_AGENTS_EXTENSION)
+    if not agents:
+        return subagents
+    if subagents is None:
+        subagents = []
+    elif not isinstance(subagents, list):
+        raise AdapterConfigError(
+            "harness.settings.deepagents.subagents must be a list when an agent "
+            "package has called agents."
+        )
+    configured = {
+        subagent.get("name") for subagent in subagents if isinstance(subagent, dict)
+    }
+    called = []
+    for name, agent in agents.items():
+        if name in configured:
+            raise AdapterConfigError(
+                f"Deep Agents subagent '{name}' is defined twice: in "
+                "harness.settings.deepagents.subagents and as a called agent of the "
+                "agent package."
+            )
+        called.append(
+            {
+                "name": name,
+                "description": agent["description"],
+                "system_prompt": agent["instructions"],
+                # A called agent keeps its own connectors. Without this member
+                # Deep Agents gives a subagent the main agent's tools.
+                "tools": [],
+            }
+        )
+    return [*subagents, *called]
 
 
 def _gate_subagent(

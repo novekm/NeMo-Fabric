@@ -84,11 +84,15 @@ pub enum SchemaName {
     FabricEvent,
     /// Runtime resource snapshot schema.
     RuntimeResourceSnapshot,
+    /// Load report of an agent package.
+    AgentPackageReport,
+    /// Caller options of an agent package load.
+    AgentPackageOptions,
 }
 
 impl SchemaName {
     /// All public schemas in stable output order.
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 32] = [
         Self::SessionRef,
         Self::ExecutionEvidence,
         Self::CheckRequest,
@@ -119,6 +123,8 @@ impl SchemaName {
         Self::ErrorInfo,
         Self::FabricEvent,
         Self::RuntimeResourceSnapshot,
+        Self::AgentPackageReport,
+        Self::AgentPackageOptions,
     ];
 
     /// Stable file stem for this schema.
@@ -154,6 +160,8 @@ impl SchemaName {
             Self::ErrorInfo => "error-info",
             Self::FabricEvent => "fabric-event",
             Self::RuntimeResourceSnapshot => "runtime-resource-snapshot",
+            Self::AgentPackageReport => "agent-package-report",
+            Self::AgentPackageOptions => "agent-package-options",
         }
     }
 
@@ -221,6 +229,8 @@ impl SchemaName {
             "runtime-resource-snapshot" | "runtime_resource_snapshot" => {
                 Ok(Self::RuntimeResourceSnapshot)
             }
+            "agent-package-report" | "agent_package_report" => Ok(Self::AgentPackageReport),
+            "agent-package-options" | "agent_package_options" => Ok(Self::AgentPackageOptions),
             _ => Err(FabricError::UnknownSchema {
                 schema: value.to_string(),
                 available: Self::ALL
@@ -267,6 +277,12 @@ pub fn generate_schema(schema: SchemaName) -> Result<Value> {
         SchemaName::ErrorInfo => to_value(schema_for!(ErrorInfo)),
         SchemaName::FabricEvent => to_value(schema_for!(FabricEvent)),
         SchemaName::RuntimeResourceSnapshot => to_value(schema_for!(RuntimeResourceSnapshot)),
+        SchemaName::AgentPackageReport => {
+            to_value(schema_for!(crate::agent_package::AgentPackageReport))
+        }
+        SchemaName::AgentPackageOptions => {
+            to_value(schema_for!(crate::agent_package::AgentPackageOptions))
+        }
     }
 }
 

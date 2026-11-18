@@ -27,6 +27,10 @@ pub use agent_execution::{
     AgentArtifact, AgentRunError, AgentRunRequest, AgentRunResult, AgentRunResultValidationError,
     AgentRunStatus, AgentUsage,
 };
+pub use agent_package::{
+    AgentPackageOptions, AgentPackageReport, load_agent_package,
+    load_agent_package_with_adapter_directories,
+};
 pub use check::{
     AdapterCheckRequest, AdapterCheckResult, CheckLevel, CheckObservation, CheckOutcome,
     CheckReason, CheckReport, CheckRequest, CheckRuntimeState, CheckScope, CheckSource, CheckStage,
