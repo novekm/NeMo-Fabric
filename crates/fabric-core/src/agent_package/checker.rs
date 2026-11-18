@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use super::error::{PackageError, PackageErrorCode, PackageResult};
+use super::http_checker::{self, Endpoint};
 use super::json::{parse_document, read_regular_file};
 use super::options::AgentPackageOptions;
 use super::report::{AgentPackageReport, CheckerDecision, CheckerFailure, CheckerResult};
@@ -46,19 +47,35 @@ const MAX_OUTPUT_BYTES: u64 = 1024 * 1024;
 const MAX_DETAIL_CHARS: usize = 2000;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-/// The checker of one load: the program, its arguments and its time limit.
+/// The checker of one load: a program with its arguments, or a URL, and
+/// its time limit.
 #[derive(Debug)]
 pub(super) struct Checker<'a> {
-    program: &'a str,
-    arguments: &'a [String],
+    asked: Asked<'a>,
     limit: Duration,
+}
+
+/// What a checker is.
+#[derive(Debug)]
+enum Asked<'a> {
+    /// A program, then its arguments.
+    Program {
+        program: &'a str,
+        arguments: &'a [String],
+    },
+    /// An HTTP checker, and the enforcers the caller says run here.
+    Http {
+        endpoint: Endpoint,
+        enforcers: &'a [String],
+    },
 }
 
 impl<'a> Checker<'a> {
     /// The checker the options name, if they name one. A time limit that is
     /// not a positive number of seconds is refused, with or without a
     /// checker. So is a checker with no program: an empty list never means
-    /// that the package starts unchecked.
+    /// that the package starts unchecked. So are a program and a URL
+    /// together, a URL the loader cannot use, and enforcers with no URL.
     pub(super) fn from_options(options: &'a AgentPackageOptions) -> PackageResult<Option<Self>> {
         let limit = match options.checker_timeout_seconds {
             None => DEFAULT_LIMIT,
@@ -73,8 +90,35 @@ impl<'a> Checker<'a> {
                     )
                 })?,
         };
-        let Some(command) = &options.checker else {
-            return Ok(None);
+        let invalid = |field, message: &str| {
+            PackageError::new(PackageErrorCode::OptionsInvalid, field, message)
+        };
+        let command = match (&options.checker, &options.checker_url) {
+            (Some(_), Some(_)) => {
+                return Err(invalid(
+                    "checker_url",
+                    "name a checker program or a checker URL, not both",
+                ));
+            }
+            (None, Some(url)) => {
+                let endpoint =
+                    Endpoint::parse(url).map_err(|message| invalid("checker_url", message))?;
+                return Ok(Some(Self {
+                    asked: Asked::Http {
+                        endpoint,
+                        enforcers: &options.checker_enforcers,
+                    },
+                    limit,
+                }));
+            }
+            (_, None) if !options.checker_enforcers.is_empty() => {
+                return Err(invalid(
+                    "checker_enforcers",
+                    "checker_enforcers is sent only to a checker URL; name checker_url",
+                ));
+            }
+            (None, None) => return Ok(None),
+            (Some(command), None) => command,
         };
         let Some((program, arguments)) = command.split_first() else {
             return Err(PackageError::new(
@@ -84,18 +128,31 @@ impl<'a> Checker<'a> {
             ));
         };
         Ok(Some(Self {
-            program,
-            arguments,
+            asked: Asked::Program { program, arguments },
             limit,
         }))
     }
 
-    /// Ask the checker about a load that is ready to start.
-    ///
-    /// The checker reads a copy of `report` without its config. It never
-    /// gives an error: a checker that cannot be asked, or that does not
-    /// answer as it must, is a deny with the failure named.
+    /// Ask the checker about a load that is ready to start. It never gives
+    /// an error: a checker that cannot be asked, or that does not answer as
+    /// it must, is a deny with the failure named.
     pub(super) fn ask(&self, report: &AgentPackageReport) -> CheckerResult {
+        match &self.asked {
+            Asked::Program { program, arguments } => self.ask_program(program, arguments, report),
+            Asked::Http {
+                endpoint,
+                enforcers,
+            } => http_checker::ask(endpoint, report, enforcers, self.limit),
+        }
+    }
+
+    /// Ask a checker program, which reads a copy of `report` without its config.
+    fn ask_program(
+        &self,
+        program: &str,
+        arguments: &[String],
+        report: &AgentPackageReport,
+    ) -> CheckerResult {
         let failed = |failure, exit_code, detail, answer| CheckerResult {
             decision: CheckerDecision::Deny,
             failure: Some(failure),
@@ -110,7 +167,7 @@ impl<'a> Checker<'a> {
                 return failed(CheckerFailure::NotStarted, None, Some(detail), None);
             }
         };
-        let status = match self.run(report, &scratch) {
+        let status = match self.run(program, arguments, report, &scratch) {
             Ok(status) => status,
             Err((failure, detail)) => {
                 return failed(failure, None, detail.or_else(|| scratch.detail()), None);
@@ -169,6 +226,8 @@ impl<'a> Checker<'a> {
     /// wrote to the two files by then counts as the checker's own.
     fn run(
         &self,
+        program: &str,
+        arguments: &[String],
         report: &AgentPackageReport,
         scratch: &Scratch,
     ) -> Result<ExitStatus, (CheckerFailure, Option<String>)> {
@@ -178,8 +237,8 @@ impl<'a> Checker<'a> {
         };
         let answer = fs::File::create(scratch.answer()).map_err(not_started)?;
         let errors = fs::File::create(scratch.errors()).map_err(not_started)?;
-        let mut child = Command::new(self.program)
-            .args(self.arguments)
+        let mut child = Command::new(program)
+            .args(arguments)
             .env_clear()
             .envs(
                 KEPT_VARIABLES
@@ -832,5 +891,297 @@ mod tests {
             Err(FabricError::AgentPackage { ref code, ref subject, .. })
                 if code == "package_options_invalid" && subject == "checker"
         ));
+    }
+
+    // -- A checker URL ----------------------------------------------------
+
+    /// A server on a free local port that answers one request with `status`
+    /// and `body`, and hands back the request it read. `chunked` sends the
+    /// body in two chunks. `silent` reads the request and never answers.
+    struct OneShot {
+        url: String,
+        request: std::sync::mpsc::Receiver<String>,
+    }
+
+    fn serve(status: &str, body: &str, chunked: bool, silent: bool) -> OneShot {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a local port");
+        let url = format!(
+            "http://{}/v1/hooks/agent-start",
+            listener.local_addr().expect("an address")
+        );
+        let (sent, request) = std::sync::mpsc::channel();
+        let status = status.to_string();
+        let body = body.to_string();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("a connection");
+            let mut read = Vec::new();
+            let mut buffer = [0u8; 4096];
+            // The head, then as many bytes as Content-Length says.
+            loop {
+                let count = stream.read(&mut buffer).expect("a read");
+                read.extend_from_slice(&buffer[..count]);
+                let text = String::from_utf8_lossy(&read).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length: usize = text[..end]
+                        .lines()
+                        .find_map(|line| line.strip_prefix("Content-Length: "))
+                        .and_then(|length| length.trim().parse().ok())
+                        .unwrap_or(0);
+                    if read.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+                if count == 0 {
+                    break;
+                }
+            }
+            let _ = sent.send(String::from_utf8_lossy(&read).to_string());
+            if silent {
+                std::thread::sleep(Duration::from_secs(5));
+                return;
+            }
+            let answer = if chunked {
+                let (first, second) = body.split_at(body.len() / 2);
+                format!(
+                    "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n{:x}\r\n{first}\r\n{:x}\r\n{second}\r\n0\r\n\r\n",
+                    first.len(),
+                    second.len()
+                )
+            } else {
+                format!(
+                    "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                    body.len()
+                )
+            };
+            let _ = stream.write_all(answer.as_bytes());
+        });
+        OneShot { url, request }
+    }
+
+    fn asked_at(url: &str) -> AgentPackageOptions {
+        AgentPackageOptions {
+            checker_url: Some(url.to_string()),
+            checker_timeout_seconds: Some(f64::from(A_DAY)),
+            ..AgentPackageOptions::default()
+        }
+    }
+
+    /// The JSON body of a request the one-shot server read.
+    fn body_of(request: &str) -> Value {
+        let (_, body) = request.split_once("\r\n\r\n").expect("a body");
+        serde_json::from_str(body).expect("a JSON body")
+    }
+
+    const GUARDRAILS_DENY: &str = r#"{"decision": "deny", "reason": "skill '$/skills/review' comes from a local folder, and hooks_server.agent_start.allow_local_sources is false"}"#;
+
+    #[test]
+    fn a_checker_url_gets_the_facts_and_its_allow_leaves_the_load_ready() {
+        let package = code_reviewer("checker-url-allows");
+        let server = serve("200 OK", r#"{"decision": "allow"}"#, false, false);
+
+        let report = load(
+            &package,
+            AgentPackageOptions {
+                checker_enforcers: vec!["openshell".to_string()],
+                ..asked_at(&server.url)
+            },
+        );
+
+        assert_eq!(report.outcome, PackageOutcome::Ready);
+        assert!(report.config.is_some());
+        assert_eq!(
+            report.checker_result,
+            Some(CheckerResult {
+                decision: CheckerDecision::Allow,
+                failure: None,
+                exit_code: None,
+                detail: None,
+                answer: json!({"decision": "allow"}).as_object().cloned(),
+            })
+        );
+        let request = server.request.recv().expect("the request");
+        assert!(request.starts_with("POST /v1/hooks/agent-start HTTP/1.1\r\n"));
+        assert!(request.contains("Content-Type: application/json\r\n"));
+        let digest = report.digests[1].digest.clone();
+        assert_eq!(
+            body_of(&request),
+            json!({
+                "hook_event_name": "AgentStart",
+                "agent_name": "code-reviewer",
+                "parts": [{
+                    "id": "$/skills/review",
+                    "type": "skill",
+                    "source": "./skills/review",
+                    "version": report.digests[1].version,
+                    "digest": digest,
+                    "local": true,
+                }],
+                "models": [],
+                "policies": [],
+                "enforcers_present": ["openshell"],
+            })
+        );
+        // Nothing of the caller's config is sent.
+        assert!(!request.contains("a-value-of-the-callers-config"));
+    }
+
+    #[test]
+    fn a_checker_url_that_denies_gives_no_config_and_its_reason_in_the_report() {
+        let package = code_reviewer("checker-url-denies");
+        let server = serve("200 OK", GUARDRAILS_DENY, true, false);
+
+        let report = load(&package, asked_at(&server.url));
+
+        assert_eq!(report.outcome, PackageOutcome::Denied);
+        assert!(report.config.is_none());
+        let result = report.checker_result.expect("a checker result");
+        assert_eq!(result.decision, CheckerDecision::Deny);
+        assert_eq!(result.failure, None);
+        assert_eq!(
+            result.answer,
+            serde_json::from_str::<Value>(GUARDRAILS_DENY)
+                .expect("json")
+                .as_object()
+                .cloned()
+        );
+    }
+
+    #[test]
+    fn a_checker_url_that_cannot_be_reached_is_a_deny() {
+        let package = code_reviewer("checker-url-unreachable");
+        // A port that was free a moment ago, with nothing listening on it.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("a local port")
+            .local_addr()
+            .expect("an address")
+            .port();
+
+        let report = load(
+            &package,
+            asked_at(&format!("http://127.0.0.1:{port}/v1/hooks/agent-start")),
+        );
+
+        assert_eq!(report.outcome, PackageOutcome::Denied);
+        assert!(report.config.is_none());
+        let result = report.checker_result.expect("a checker result");
+        assert_eq!(result.decision, CheckerDecision::Deny);
+        assert_eq!(result.failure, Some(CheckerFailure::Unreachable));
+        assert!(
+            result
+                .detail
+                .expect("a detail")
+                .contains("cannot be reached")
+        );
+    }
+
+    #[test]
+    fn a_checker_url_that_does_not_answer_as_it_must_is_a_deny() {
+        for (status, body, failure) in [
+            (
+                "422 Unprocessable Entity",
+                r#"{"error": {"message": "body.parts: Field required"}}"#,
+                CheckerFailure::UnexpectedStatus,
+            ),
+            (
+                "404 Not Found",
+                r#"{"error": {"code": "check_not_configured"}}"#,
+                CheckerFailure::UnexpectedStatus,
+            ),
+            (
+                "200 OK",
+                r#"{"decision": "maybe"}"#,
+                CheckerFailure::InvalidAnswer,
+            ),
+            ("200 OK", r#"["allow"]"#, CheckerFailure::InvalidAnswer),
+            ("200 OK", "allow", CheckerFailure::InvalidAnswer),
+        ] {
+            let package = code_reviewer("checker-url-invalid");
+            let server = serve(status, body, false, false);
+
+            let report = load(&package, asked_at(&server.url));
+
+            assert_eq!(report.outcome, PackageOutcome::Denied, "{status} {body}");
+            let result = report.checker_result.expect("a checker result");
+            assert_eq!(result.failure, Some(failure), "{status} {body}");
+            if failure == CheckerFailure::UnexpectedStatus {
+                assert!(
+                    result
+                        .detail
+                        .expect("a detail")
+                        .contains(status.split(' ').next().unwrap())
+                );
+                assert!(result.answer.is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn a_checker_url_that_does_not_answer_in_time_is_a_deny() {
+        let package = code_reviewer("checker-url-silent");
+        let server = serve("200 OK", "", false, true);
+
+        let report = load(
+            &package,
+            AgentPackageOptions {
+                checker_timeout_seconds: Some(0.3),
+                ..asked_at(&server.url)
+            },
+        );
+
+        assert_eq!(report.outcome, PackageOutcome::Denied);
+        assert_eq!(
+            report.checker_result.expect("a checker result").failure,
+            Some(CheckerFailure::TimedOut)
+        );
+    }
+
+    #[test]
+    fn a_checker_url_the_loader_cannot_use_is_refused() {
+        let package = code_reviewer("checker-url-refused");
+        let refusals = [
+            AgentPackageOptions {
+                checker_url: Some("http://127.0.0.1:8100/v1/hooks/agent-start".to_string()),
+                ..checked_by(ALLOW, &[])
+            },
+            asked_at("https://checker.example.com/v1/hooks/agent-start"),
+            asked_at("http://user:secret@127.0.0.1:8100/"),
+            asked_at("http://127.0.0.1:0/"),
+            asked_at("http://127.0.0.1:99999/"),
+            asked_at("http:///v1/hooks/agent-start"),
+            asked_at("http://127.0.0.1:8100/a path"),
+        ];
+        for options in refusals {
+            let named = options.checker_url.clone();
+            let refused = load_agent_package(&package.root, Some(config()), options, context());
+            assert!(
+                matches!(
+                    refused,
+                    Err(FabricError::AgentPackage { ref code, ref subject, .. })
+                        if code == "package_options_invalid" && subject == "checker_url"
+                ),
+                "{named:?}"
+            );
+        }
+        let enforcers_alone = AgentPackageOptions {
+            checker_enforcers: vec!["openshell".to_string()],
+            ..AgentPackageOptions::default()
+        };
+        assert!(matches!(
+            load_agent_package(&package.root, Some(config()), enforcers_alone, context()),
+            Err(FabricError::AgentPackage { ref code, ref subject, .. })
+                if code == "package_options_invalid" && subject == "checker_enforcers"
+        ));
+    }
+
+    #[test]
+    fn a_checker_url_is_not_asked_about_a_package_that_cannot_start() {
+        let package = code_reviewer("checker-url-not-asked");
+        // Nothing listens: a load that asked would be denied as unreachable.
+        let options = asked_at("http://127.0.0.1:9/v1/hooks/agent-start");
+
+        let report = load_agent_package(&package.root, None, options, context()).expect("a report");
+
+        assert_eq!(report.checker_result, None);
     }
 }

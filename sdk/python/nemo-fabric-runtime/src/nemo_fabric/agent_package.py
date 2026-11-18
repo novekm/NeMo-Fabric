@@ -146,8 +146,9 @@ class AgentPackageCheckerResult(FabricMapping):
     Attributes:
         decision: ``allow`` or ``deny``. A checker that failed is a ``deny``.
         failure: Why the checker counts as failed: ``not_started``,
-            ``timed_out``, ``output_too_large``, ``unexpected_exit`` or
-            ``invalid_answer``. ``None`` when it answered as it must.
+            ``timed_out``, ``output_too_large``, ``unexpected_exit``,
+            ``invalid_answer``, or for a checker URL ``unreachable`` or
+            ``unexpected_status``. ``None`` when it answered as it must.
         exit_code: The exit code of the checker. ``None`` when it was not
             started, ran past the time limit, wrote more than it may, or was
             ended by a signal.
@@ -269,6 +270,7 @@ class AgentPackageReport(FabricMapping):
             "checker_result",
         }
     )
+
     @classmethod
     def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
         for field in ("package_dir", "base_dir", "outcome"):
@@ -373,6 +375,8 @@ def load_agent_package(
     expected_lock_sha256: str | None = None,
     bindings: Mapping[str, str] | None = None,
     checker: Sequence[str] | None = None,
+    checker_url: str | None = None,
+    checker_enforcers: Sequence[str] | None = None,
     checker_timeout_seconds: float | None = None,
 ) -> AgentPackageReport:
     """Read, check and map one agent package. Fetches nothing.
@@ -465,6 +469,17 @@ def load_agent_package(
             deny, reported as a checker that failed. The report holds the
             answer in ``checker_result``. A load the checker does not allow
             has the outcome ``denied`` and no config.
+        checker_url: A checker reached over HTTP in place of a program, such
+            as ``http://127.0.0.1:8100/v1/hooks/agent-start``. The loader
+            posts plain facts about the agent: each part with its type,
+            source, version, digest and whether it is local, the models
+            named, and the policies with the enforcers each needs. A ``200``
+            answer with ``"decision": "allow"`` lets the package start; a
+            deny, a checker that cannot be reached, another status, or no
+            answer in time does not. Only ``http`` is spoken. Naming it with
+            ``checker`` is refused.
+        checker_enforcers: The enforcers that run where the agent starts,
+            sent to ``checker_url``. Refused without ``checker_url``.
         checker_timeout_seconds: The time limit of the checker, in seconds.
             ``None`` uses 30. A checker that runs longer is ended, and the
             load is denied.
@@ -512,6 +527,19 @@ def load_agent_package(
                 details={"subject": "checker"},
             )
         options["checker"] = list(checker)
+    if checker_url is not None:
+        options["checker_url"] = checker_url
+    if checker_enforcers is not None:
+        if isinstance(checker_enforcers, str) or not isinstance(
+            checker_enforcers, Sequence
+        ):
+            raise FabricConfigError(
+                "The agent package option checker_enforcers must be a list of names",
+                stage=_STAGE,
+                code="package_options_invalid",
+                details={"subject": "checker_enforcers"},
+            )
+        options["checker_enforcers"] = list(checker_enforcers)
     if checker_timeout_seconds is not None:
         options["checker_timeout_seconds"] = checker_timeout_seconds
     return AgentPackageReport.from_mapping(

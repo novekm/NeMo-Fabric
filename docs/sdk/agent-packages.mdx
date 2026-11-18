@@ -197,6 +197,29 @@ For a checker that failed, `detail` is one of three texts. It is what the operat
 
 When you pass a checker and a `check` function, the checker is asked first, during the load. The function is called only when the checker allowed the start, and the report it receives holds the checker's answer in `checker_result`.
 
+### Ask a Checker URL
+
+A checker can also be a server. Name it in the load options as `checker_url`, in place of `checker`: an `http://` URL. The loader posts plain facts about the agent and reads the decision from the answer. The server reads no package. The NeMo Guardrails hooks server answers this request at `/v1/hooks/agent-start`:
+
+```python
+runtime = await fabric.start_agent_package(
+    package_dir,
+    config,
+    options={
+        "checker_url": "http://127.0.0.1:8100/v1/hooks/agent-start",
+        "checker_enforcers": ["openshell"],
+    },
+)
+```
+
+| What | How it works |
+|---|---|
+| What it is sent | One JSON object: `hook_event_name` (`AgentStart`), `agent_name`, `parts`, `models`, `policies` and `enforcers_present`. A part is every lock entry below the entry document, called agents and their parts included, with its `id` (the lock address), `type`, `source` as the package states it (such as `git::<url>//<subpath>`), `version`, `digest` and `local`. A pinned model is named under `models` with the agent's default model. A policy lists as its `enforcers` the folders its package has, such as `openshell`. `enforcers_present` is `checker_enforcers`. Nothing of your config is sent. |
+| What it answers | `200` with `"decision": "allow"` lets the package start. `200` with `"decision": "deny"` does not, and the answer is kept as a checker's is. |
+| Anything else | A deny, reported as a checker that failed: `unreachable` for a server that cannot be reached, `unexpected_status` for another status, `invalid_answer` for an answer with no decision, `timed_out` for no answer within `checker_timeout_seconds`, `output_too_large` for more than 1 MiB. |
+| Where the address comes from | The load options only, never the package. Naming `checker` and `checker_url` together is refused, and so is `checker_enforcers` without `checker_url`. |
+| What it speaks | `http` only, with no new dependency. Reach a checker on another host through a local address. |
+
 ### What a Checker Is Not
 
 - **It is not part of NeMo Fabric.** NeMo Fabric ships no checker, needs none, and knows none by name. Any program that keeps the contract is a checker.

@@ -141,8 +141,15 @@ pub enum CheckerFailure {
     /// The program ended with an exit code that is neither 0 nor 2, or a signal ended it.
     UnexpectedExit,
     /// The program wrote something that is not one JSON object, or a
-    /// `decision` that does not fit its exit code.
+    /// `decision` that does not fit its exit code. For a checker URL: the
+    /// answer is not HTTP, or not a JSON object with `decision` set to
+    /// `allow` or `deny`.
     InvalidAnswer,
+    /// The checker URL could not be reached: no address, a refused
+    /// connection, or a connection that broke.
+    Unreachable,
+    /// The checker URL answered with an HTTP status other than 200.
+    UnexpectedStatus,
 }
 
 /// The adapter a package was mapped for.

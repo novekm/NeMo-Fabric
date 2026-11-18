@@ -15,6 +15,7 @@ mod error;
 mod facts;
 mod fetch;
 mod graph;
+mod http_checker;
 mod json;
 mod load;
 mod lock;
