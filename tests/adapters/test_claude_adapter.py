@@ -2862,3 +2862,104 @@ def test_the_guardrails_setting_is_validated_by_the_manifest():
     ):
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(bad, schema)
+
+
+class _ModelCallStub:
+    """A local NeMo Guardrails hooks server that answers one model-call decision and keeps what it was sent."""
+
+    def __init__(self, answer: dict[str, Any]) -> None:
+        import http.server
+        import threading
+
+        self.requests: list[tuple[str, dict[str, str], dict[str, Any]]] = []
+        stub = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802 - the name http.server calls
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                stub.requests.append((self.path, {k.lower(): v for k, v in self.headers.items()}, body))
+                data = json.dumps(answer).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def _model_check(claude_payload, url: str):
+    claude_payload["config"]["harness"]["settings"]["nemo_guardrails"] = {
+        "url": url,
+        "agent_name": "release-reviewer",
+        "agent_digest": "sha256:abc",
+        "timeout_seconds": 2,
+    }
+    return adapter.guardrails_model_check(agent_config(claude_payload))
+
+
+def test_without_the_guardrails_setting_no_model_is_asked_about(claude_payload):
+    assert adapter.guardrails_model_check(agent_config(claude_payload)) is None
+
+
+def test_each_invocation_asks_about_its_model_with_the_run_and_the_agent(claude_payload, monkeypatch):
+    monkeypatch.setenv("FABRIC_RUNTIME_ID", "runtime-9")
+    stub = _ModelCallStub({"decision": "allow", "rule": "hooks_server.agent_start"})
+    try:
+        assert _model_check(claude_payload, stub.url)() is None
+    finally:
+        stub.close()
+    ((path, headers, body),) = stub.requests
+    model = adapter._selected_model_config(agent_config(claude_payload))
+    assert path == "/v1/hooks/model-call"
+    assert headers["x-nemo-run-id"] == "runtime-9"
+    assert body == {
+        "hook_event_name": "ModelCall",
+        "agent_name": "release-reviewer",
+        "agent_digest": "sha256:abc",
+        "model": adapter.guardrails_model_name(model),
+    }
+    assert body["model"].startswith(f"{model.provider}::")
+
+
+def test_a_refused_model_refuses_the_invocation(claude_payload):
+    stub = _ModelCallStub({"decision": "deny", "reason": "model 'x' is not allowed"})
+    try:
+        refusal = _model_check(claude_payload, stub.url)()
+    finally:
+        stub.close()
+    assert refusal is not None and "model 'x' is not allowed" in refusal
+
+
+def test_a_guardrails_server_that_does_not_answer_refuses_the_model(claude_payload):
+    refusal = _model_check(claude_payload, "http://127.0.0.1:9")()
+    assert refusal is not None and "did not answer" in refusal
+
+
+async def test_an_invocation_whose_model_guardrails_refuses_never_runs(claude_payload, monkeypatch):
+    stub = _ModelCallStub({"decision": "deny", "reason": "model 'x' is not allowed"})
+    claude_payload["config"]["harness"]["settings"]["nemo_guardrails"] = {"url": stub.url, "agent_name": "a"}
+    runtime = adapter.ClaudeRuntime()
+    runtime._agent_config = agent_config(claude_payload)
+    runtime._fabric_runtime_id = claude_payload["runtime_context"]["runtime_id"]
+    runtime._client = MagicMock(spec=adapter.ClaudeSDKClient)
+    run_query = AsyncMock(return_value={"completed": True})
+    monkeypatch.setattr(runtime, "_run_query", run_query)
+    try:
+        result = await runtime.invoke(*lifecycle_invocation(claude_payload))
+    finally:
+        stub.close()
+
+    run_query.assert_not_awaited()
+    view = result_view(result)
+    assert view["failed"] and view["error"]["code"] == "claude_model_refused"
+    assert "model 'x' is not allowed" in view["error"]["message"]
