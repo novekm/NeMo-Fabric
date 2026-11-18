@@ -911,6 +911,163 @@ class Runtime:
             finally:
                 await self._close_streaming_resources()
 
+    async def stop_for(
+        self,
+        *,
+        reason: str,
+        requested_by: str,
+        violation: Mapping[str, Any] | None = None,
+        quarantine: bool = False,
+        called: Sequence[Runtime] = (),
+    ) -> dict[str, Any]:
+        """Stop this runtime for a reason, with the runtimes of the agents it calls.
+
+        A rule that ends a run, or a person with no violation (a kill switch),
+        calls this. The lead stops first, so it starts no new call, then each
+        runtime in ``called``. A runtime that fails to stop does not keep the
+        others running. Nothing else is deleted: the workspace, the artifacts
+        and the harness session stay.
+
+        Args:
+            reason: Why the run ends. Not blank.
+            requested_by: Who asked. Not blank.
+            violation: The decision that asked for the stop, as its rule wrote
+                it. ``None`` for a stop no rule asked for.
+            quarantine: Whether the stop is a quarantine. The quarantine itself
+                is kept by the checker that refuses later starts.
+            called: Runtimes of agents this one calls, started apart from it.
+
+        Returns:
+            The stop record: ``stop_id``, ``reason``, ``requested_by``,
+            ``violation``, ``quarantine``, the outcome of each runtime, and the
+            events, ending with ``runtime.stop_requested``.
+
+        Raises:
+            FabricError: If the reason or the requester is blank.
+        """
+
+        runtimes = [self, *called]
+        native = self._client._require_native_module("stop")
+        request = {
+            "reason": reason,
+            "requested_by": requested_by,
+            "quarantine": quarantine,
+        }
+        if violation is not None:
+            request["violation"] = dict(violation)
+        called_json = json.dumps(
+            [
+                {
+                    "plan": runtime._plan.to_mapping(),
+                    "runtime": runtime._runtime.to_mapping(),
+                }
+                for runtime in called
+            ]
+        )
+
+        def stop() -> Any:
+            return json.loads(
+                native.stop_runtime_for(
+                    json.dumps(self._plan.to_mapping()),
+                    json.dumps(self._runtime.to_mapping()),
+                    called_json,
+                    json.dumps(request),
+                )
+            )
+
+        for runtime in runtimes:
+            runtime._closing = True
+        try:
+            record = await _call_blocking(stop)
+        except Exception as error:
+            raise _runtime_error(error, stage="stop") from error
+        finally:
+            for runtime in runtimes:
+                runtime._closing = False
+        for runtime, outcome in zip(runtimes, record["runtimes"]):
+            runtime._status = (
+                RuntimeStatus.STOPPED if outcome["stopped"] else RuntimeStatus.FAILED
+            )
+            self._client._record_stopped_runtime(runtime)
+            try:
+                await runtime._deregister_requests()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "ATOF collector deregistration failed during a stop: %s",
+                    cleanup_error,
+                )
+            finally:
+                await runtime._close_streaming_resources()
+        return record
+
+    def watch_stop_url(
+        self,
+        url: str,
+        *,
+        called: Sequence[Runtime] = (),
+        interval_seconds: float = 0.5,
+        timeout_seconds: float = 5.0,
+    ) -> asyncio.Task[dict[str, Any] | None]:
+        """Watch a URL that says whether a rule stopped this run, and stop it when one did.
+
+        ``url`` may hold ``{runtime_id}``, such as
+        ``http://127.0.0.1:8100/v1/runs/{runtime_id}``, the NeMo Guardrails
+        hooks server's answer to which run a stop belongs to. The harness names
+        the run in each check with this runtime's id. The answer is
+        ``{"stop": null}``, or ``{"stop": {"outcome": "stop" | "quarantine",
+        "reason": ..., "by": ...}}``. On a stop the run ends through
+        :meth:`stop_for`, with ``called``, the reason and who asked, the answer
+        as the violation, and ``quarantine`` for a quarantine.
+
+        The watch ends when this runtime stops by any means. A URL that cannot
+        be reached or answers otherwise is logged and asked again: the rule
+        has already denied the call it stopped. Cancel the task to stop
+        watching.
+
+        Returns:
+            A task whose result is the stop record, or ``None`` when the
+            runtime stopped otherwise.
+        """
+
+        target = url.replace("{runtime_id}", self.runtime_id)
+
+        async def watch() -> dict[str, Any] | None:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                while self._status is RuntimeStatus.ACTIVE:
+                    try:
+                        response = await client.get(target)
+                        stop = (
+                            response.json().get("stop")
+                            if response.status_code == 200
+                            else None
+                        )
+                        if response.status_code != 200:
+                            logger.warning(
+                                "stop URL %s answered HTTP %s",
+                                target,
+                                response.status_code,
+                            )
+                    except (httpx.HTTPError, ValueError, AttributeError) as error:
+                        logger.warning("stop URL %s did not answer: %s", target, error)
+                        stop = None
+                    if isinstance(stop, Mapping) and stop.get("outcome") in (
+                        "stop",
+                        "quarantine",
+                    ):
+                        return await self.stop_for(
+                            reason=str(stop.get("reason") or "a rule stopped the run"),
+                            requested_by=str(stop.get("by") or target),
+                            violation=stop,
+                            quarantine=stop.get("outcome") == "quarantine",
+                            called=called,
+                        )
+                    await asyncio.sleep(interval_seconds)
+            return None
+
+        return asyncio.create_task(watch(), name=f"fabric-stop-watch-{self.runtime_id}")
+
     async def _deregister_requests(self) -> None:
         errors: list[Exception] = []
         for request_id in tuple(self._registered_requests):
