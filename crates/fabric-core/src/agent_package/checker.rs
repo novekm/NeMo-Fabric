@@ -1019,12 +1019,44 @@ mod tests {
                     "local": true,
                 }],
                 "models": [],
+                "declared_models": [],
+                "bound_model": null,
                 "policies": [],
                 "enforcers_present": ["openshell"],
             })
         );
         // Nothing of the caller's config is sent.
         assert!(!request.contains("a-value-of-the-callers-config"));
+    }
+
+    #[test]
+    fn the_facts_name_the_model_the_config_binds_the_run_to() {
+        let package = code_reviewer("checker-url-bound-model");
+        let server = serve("200 OK", r#"{"decision": "allow"}"#, false, false);
+        let mut with_model = serde_json::to_value(config()).expect("a config");
+        with_model["models"] =
+            json!({"default": {"provider": "bedrock", "model": "us.anthropic.claude-haiku-5-5"}});
+        let with_model: FabricConfig = serde_json::from_value(with_model).expect("a config");
+
+        load_agent_package(
+            &package.root,
+            Some(with_model),
+            asked_at(&server.url),
+            context(),
+        )
+        .expect("a load");
+
+        let body = body_of(&server.request.recv().expect("the request"));
+        // The rule judges what will run: the bound model is in `models`, and named as bound.
+        assert_eq!(
+            body["models"],
+            json!(["bedrock::us.anthropic.claude-haiku-5-5"])
+        );
+        assert_eq!(body["declared_models"], json!([]));
+        assert_eq!(
+            body["bound_model"],
+            json!("bedrock::us.anthropic.claude-haiku-5-5")
+        );
     }
 
     #[test]
