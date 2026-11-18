@@ -95,6 +95,28 @@ pub struct AgentPackageOptions {
     /// `denied` and no config.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checker: Option<Vec<String>>,
+    /// A checker reached over HTTP, in place of a program: an `http://` URL
+    /// such as `http://127.0.0.1:8100/v1/hooks/agent-start`. Left out: no
+    /// HTTP checker is asked. Naming it together with `checker` is refused.
+    ///
+    /// The loader posts plain facts about the agent, gathered from the load:
+    /// the agent's name, each part with its type, source, version, digest
+    /// and whether the source is local, the models named, and the policies
+    /// with the enforcers each needs. The body is the request of the NeMo
+    /// Guardrails hooks server's `/v1/hooks/agent-start` endpoint. A `200`
+    /// answer with `"decision": "allow"` lets the package start, and one
+    /// with `"decision": "deny"` does not. Anything else is a deny, reported
+    /// as a checker that failed: a checker that cannot be reached, another
+    /// status, an answer with no decision, or no answer in time. The address
+    /// comes from these options, never from the package. Only `http` is
+    /// spoken; reach a remote checker through a local address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checker_url: Option<String>,
+    /// The enforcers that run where the agent starts, such as `openshell`,
+    /// sent to the checker URL as `enforcers_present`. Refused without
+    /// `checker_url`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checker_enforcers: Vec<String>,
     /// The time limit of the checker, in seconds. Default 30. A checker that
     /// runs longer is ended, and the load is denied.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,6 +136,8 @@ impl Default for AgentPackageOptions {
             expected_lock_sha256: None,
             bindings: BTreeMap::new(),
             checker: None,
+            checker_url: None,
+            checker_enforcers: Vec::new(),
             checker_timeout_seconds: None,
         }
     }

@@ -247,7 +247,17 @@
         },
         {
           "const": "invalid_answer",
-          "description": "The program wrote something that is not one JSON object, or a\n`decision` that does not fit its exit code.",
+          "description": "The program wrote something that is not one JSON object, or a\n`decision` that does not fit its exit code. For a checker URL: the\nanswer is not HTTP, or not a JSON object with `decision` set to\n`allow` or `deny`.",
+          "type": "string"
+        },
+        {
+          "const": "unreachable",
+          "description": "The checker URL could not be reached: no address, a refused\nconnection, or a connection that broke.",
+          "type": "string"
+        },
+        {
+          "const": "unexpected_status",
+          "description": "The checker URL answered with an HTTP status other than 200.",
           "type": "string"
         }
       ]

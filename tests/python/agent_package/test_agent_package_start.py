@@ -426,6 +426,106 @@ async def test_start_with_a_checker_that_allows_starts_and_the_check_reads_its_a
     assert report.checker_result["answer"]["rules"] == ["approved-hooks"]
 
 
+class _AgentStartServer:
+    """A local stand-in for the Guardrails hooks server's agent-start endpoint."""
+
+    def __init__(self, answer: dict, status: int = 200) -> None:
+        import http.server
+        import json
+
+        self.requests: list[dict] = []
+        server = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802 - the name http.server calls
+                length = int(self.headers["Content-Length"])
+                server.requests.append(json.loads(self.rfile.read(length)))
+                body = json.dumps(answer).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = (
+            f"http://127.0.0.1:{self.httpd.server_address[1]}/v1/hooks/agent-start"
+        )
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+async def test_start_with_a_checker_url_that_denies_starts_nothing(
+    client, mock_start_runtime, package_dir, shim_config, hermes_shim_agent_dir
+):
+    reason = "skill '$/skills/release-notes' comes from a local folder"
+    server = _AgentStartServer({"decision": "deny", "reason": reason})
+    try:
+        with pytest.raises(FabricConfigError) as caught:
+            await client.start_agent_package(
+                package_dir,
+                shim_config,
+                base_dir=hermes_shim_agent_dir,
+                options={"checker_url": server.url, "checker_enforcers": ["openshell"]},
+            )
+    finally:
+        server.close()
+
+    assert caught.value.code == "package_check_denied"
+    assert caught.value.details == {"answer": {"decision": "deny", "reason": reason}}
+    (facts,) = server.requests
+    assert facts["hook_event_name"] == "AgentStart"
+    assert facts["enforcers_present"] == ["openshell"]
+    assert {part["id"]: (part["type"], part["local"]) for part in facts["parts"]}[
+        "$/skills/release-notes"
+    ] == ("skill", True)
+    mock_start_runtime.assert_not_awaited()
+
+
+async def test_start_with_a_checker_url_that_cannot_be_reached_starts_nothing(
+    client, mock_start_runtime, package_dir, shim_config, hermes_shim_agent_dir
+):
+    server = _AgentStartServer({"decision": "allow"})
+    url = server.url
+    server.close()
+
+    with pytest.raises(FabricConfigError) as caught:
+        await client.start_agent_package(
+            package_dir,
+            shim_config,
+            base_dir=hermes_shim_agent_dir,
+            options={"checker_url": url},
+        )
+
+    assert caught.value.code == "package_check_failed"
+    assert caught.value.details["failure"] == "unreachable"
+    mock_start_runtime.assert_not_awaited()
+
+
+async def test_start_with_a_checker_url_that_allows_starts(
+    client, mock_start_runtime, package_dir, shim_config, hermes_shim_agent_dir
+):
+    server = _AgentStartServer({"decision": "allow"})
+    try:
+        runtime = await client.start_agent_package(
+            package_dir,
+            shim_config,
+            base_dir=hermes_shim_agent_dir,
+            options={"checker_url": server.url},
+        )
+    finally:
+        server.close()
+
+    assert runtime is mock_start_runtime.return_value
+    mock_start_runtime.assert_awaited_once()
+
+
 async def test_stopped_load_starts_nothing(
     tmp_path,
     client,
