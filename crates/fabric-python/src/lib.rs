@@ -99,6 +99,20 @@ fn load_agent_package(
     to_json(&report)
 }
 
+/// The facts a checker URL is sent for the package of `report_json`, as JSON. Starts nothing, asks no checker.
+#[pyfunction]
+fn agent_package_start_facts(report_json: &str, enforcers_json: &str) -> PyResult<String> {
+    let report: nemo_fabric_core::agent_package::AgentPackageReport =
+        serde_json::from_str(report_json)
+            .map_err(|error| PyValueError::new_err(format!("not a load report: {error}")))?;
+    let enforcers: Vec<String> = serde_json::from_str(enforcers_json).map_err(|error| {
+        PyValueError::new_err(format!("enforcers are not a list of text: {error}"))
+    })?;
+    to_json(&nemo_fabric_core::agent_package::agent_package_start_facts(
+        &report, &enforcers,
+    ))
+}
+
 fn parse_package_options<T: serde::de::DeserializeOwned>(options_json: &str) -> PyResult<T> {
     serde_json::from_str(options_json).map_err(|error| {
         to_py_error(FabricError::AgentPackage {
@@ -683,6 +697,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(invoke_openai_stream, m)?)?;
     m.add_function(wrap_pyfunction!(stop_runtime, m)?)?;
     m.add_function(wrap_pyfunction!(stop_runtime_for, m)?)?;
+    m.add_function(wrap_pyfunction!(agent_package_start_facts, m)?)?;
     m.add_function(wrap_pyfunction!(runtime_resource_snapshot, m)?)?;
     Ok(())
 }

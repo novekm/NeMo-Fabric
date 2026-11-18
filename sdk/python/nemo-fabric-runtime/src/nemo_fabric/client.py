@@ -923,7 +923,7 @@ class Fabric:
         )
         # Raises for a load that stopped, so the check is asked only about a
         # package that can start.
-        mapped = report.to_config()
+        mapped = _with_guardrails_identity(report.to_config(), report)
         if check is not None:
             try:
                 answer = await _call_blocking(lambda: check(report))
@@ -1656,3 +1656,26 @@ async def _release_registered_service(
         )
     except Exception:
         pass
+
+
+def _with_guardrails_identity(config: FabricConfig, report: Any) -> FabricConfig:
+    """Name the package's agent in the harness's ``nemo_guardrails`` setting, when it has one.
+
+    A NeMo Guardrails hooks server knows a quarantined agent by its name and
+    package digest, so the hook that sends each tool call names both: the
+    entry document's name, and the sha256 of the lock, as the start facts name
+    them. A value the config already sets is kept."""
+
+    harness = config.harness
+    setting = harness.settings.get("nemo_guardrails") if harness is not None else None
+    if not isinstance(setting, Mapping):
+        return config
+    filled = {
+        "agent_name": report.entry["name"],
+        "agent_digest": "sha256:" + report.lock["sha256"],
+        **setting,
+    }
+    settings = {**harness.settings, "nemo_guardrails": filled}
+    return config.model_copy(
+        update={"harness": harness.model_copy(update={"settings": settings})}
+    )

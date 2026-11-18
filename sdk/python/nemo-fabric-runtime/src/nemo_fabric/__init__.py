@@ -11,7 +11,7 @@ from nemo_fabric.agent_package import AgentPackageFetchReport
 from nemo_fabric.agent_package import AgentPackageReport
 from nemo_fabric.agent_package import fetch_agent_package
 from nemo_fabric.agent_package import fetch_agent_package_from_git
-from nemo_fabric.agent_package import load_agent_package
+from nemo_fabric.agent_package import agent_package_start_facts, load_agent_package
 from nemo_fabric.check import CheckReport, CheckRequest
 from nemo_fabric.capabilities import AdapterCapabilityProfile
 from nemo_fabric.capabilities import AdapterCompatibilityIssue
@@ -203,5 +203,6 @@ __all__ = [
     "fetch_agent_package",
     "fetch_agent_package_from_git",
     "inspect_adapter",
+    "agent_package_start_facts",
     "load_agent_package",
 ]

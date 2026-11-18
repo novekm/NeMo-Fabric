@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import subprocess
+import urllib.request
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import is_dataclass
@@ -796,6 +797,75 @@ def tool_policy_hooks(config: AgentConfig) -> dict[str, list[HookMatcher]] | Non
     return {"PreToolUse": [HookMatcher(hooks=[enforce_policy])]}
 
 
+# The headers a NeMo Guardrails hooks server reads to name the run and the agent of a tool call.
+_GUARDRAILS_RUN_HEADER = "x-nemo-run-id"
+_GUARDRAILS_AGENT_NAME_HEADER = "x-nemo-agent-name"
+_GUARDRAILS_AGENT_DIGEST_HEADER = "x-nemo-agent-digest"
+_GUARDRAILS_TIMEOUT_SECONDS = 30.0
+
+
+def guardrails_hooks(config: AgentConfig) -> dict[str, list[HookMatcher]] | None:
+    """Ask a NeMo Guardrails hooks server about every tool call, with the run and the agent named.
+
+    The ``nemo_guardrails`` setting names the server's ``url``; ``agent_name``
+    and ``agent_digest`` name the agent, and ``start_agent_package`` fills them
+    from the package. The PreToolUse hook posts the call to the server's
+    Claude Code path with the ``x-nemo-run-id`` header (this runtime's id), and
+    the agent's name and digest, and hands the server's answer to Claude Code:
+    a deny blocks the call, and ``continue`` false ends the run. A server that
+    does not answer denies the call."""
+
+    setting = _settings(config).get("nemo_guardrails")
+    if not setting:
+        return None
+    endpoint = str(setting["url"]).rstrip("/") + "/v1/hooks/claude-code"
+    timeout = float(setting.get("timeout_seconds", _GUARDRAILS_TIMEOUT_SECONDS))
+    headers = {"content-type": "application/json"}
+    if setting.get("agent_name"):
+        headers[_GUARDRAILS_AGENT_NAME_HEADER] = str(setting["agent_name"])
+    if setting.get("agent_digest"):
+        headers[_GUARDRAILS_AGENT_DIGEST_HEADER] = str(setting["agent_digest"])
+    run_id = os.environ.get("FABRIC_RUNTIME_ID")
+    if run_id:
+        headers[_GUARDRAILS_RUN_HEADER] = run_id
+
+    def post(body: bytes) -> dict[str, Any]:
+        request = urllib.request.Request(endpoint, body, headers)
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read() or b"{}")
+
+    async def ask_guardrails(
+        hook_input: dict[str, Any],
+        tool_use_id: str | None,
+        _context: dict[str, Any],
+    ) -> dict[str, Any]:
+        body = {
+            **hook_input,
+            "hook_event_name": "PreToolUse",
+            "tool_use_id": hook_input.get("tool_use_id") or tool_use_id or "",
+        }
+        try:
+            answer = await asyncio.to_thread(post, json.dumps(body).encode())
+        except (OSError, ValueError) as error:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        f"NeMo Guardrails at {endpoint} did not answer: {error}"
+                    ),
+                }
+            }
+        if not isinstance(answer, dict):
+            return {}
+        # The SDK names `continue` as `continue_`, a word Python reserves.
+        if "continue" in answer:
+            answer["continue_"] = answer.pop("continue")
+        return answer
+
+    return {"PreToolUse": [HookMatcher(hooks=[ask_guardrails])]}
+
+
 _HOOKS_KEY = "nemo_fabric.hooks.v1"
 
 
@@ -805,6 +875,8 @@ def _hooks(
     """Join the tools policy hook with the hooks an agent package declares."""
 
     hooks = tool_policy_hooks(config) or {}
+    for event, matchers in (guardrails_hooks(config) or {}).items():
+        hooks.setdefault(event, []).extend(matchers)
     try:
         declared = package_hooks.package_hook_matchers(
             _extension(config, _HOOKS_KEY).get("entries", []),
