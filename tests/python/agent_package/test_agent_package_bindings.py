@@ -552,3 +552,42 @@ def test_load_with_bindings_keeps_the_callers_own_config_fields(
     assert config.to_mapping()["metadata"]["my_app_bindings"] == team_bindings
     plan = Fabric().plan(config, base_dir=report.base_dir)
     assert plan.agent_name == LEAD
+
+
+def test_a_binding_keeps_a_team_limit_and_names_who_enforces_it(
+    tmp_path, agent, package_files, shim_config, hermes_shim_agent_dir
+):
+    root = tmp_path / "limits"
+    write_package(
+        root,
+        {**agent, "limits": {"max_depth": 1, "max_parallel": 2, "max_total_tokens": 1000}},
+        package_files,
+    )
+    bindings = {
+        "limits.max_depth": "the harness",
+        "limits.max_parallel": "the harness",
+        "limits.max_total_tokens": "a model gateway",
+    }
+    report = load_agent_package(
+        root, shim_config, base_dir=hermes_shim_agent_dir, bindings=bindings
+    )
+    assert report.outcome == "ready"
+    lines = {line["id"]: line for line in report.declared}
+    for name, target in bindings.items():
+        line = lines[f"agent:/{name.replace('.', '/')}"]
+        assert (line["status"], line["bound_to"]) == ("bound", target)
+    assert lines["agent:/limits/max_total_tokens"]["detail"].startswith("1000 applies")
+    # Without the bindings the limits stop the load, each named.
+    unbound = load_agent_package(root, shim_config, base_dir=hermes_shim_agent_dir)
+    assert unbound.outcome == "stopped"
+    assert set(unbound.stopped_by) == {
+        "agent:/limits/max_depth",
+        "agent:/limits/max_parallel",
+        "agent:/limits/max_total_tokens",
+    }
+
+
+def test_a_limit_binding_for_a_limit_fabric_holds_is_refused(package_dir, shim_config):
+    with pytest.raises(FabricConfigError) as raised:
+        load_agent_package(package_dir, shim_config, bindings={"limits.max_turns": "x"})
+    assert raised.value.code == "package_options_invalid"

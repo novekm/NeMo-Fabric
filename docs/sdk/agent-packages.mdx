@@ -524,7 +524,7 @@ The agent meant here is the agent that runs: its variables filled in, and read t
 | `model.capabilities`, `model.min_context_tokens` | A runtime need. | Status from the `model` fact. |
 | `limits.max_turns` | `runtime.max_turns` | Follows `if_unsupported` when the adapter does not accept it, or when the number is above 4294967295. |
 | `limits.timeout_seconds` | `runtime.timeout_seconds`. It bounds each invocation. A called agent you bind and run outside the invocation is yours to bound, and the line's `detail` says so. | Follows `if_unsupported` when the number is too large to hold as a duration. |
-| `limits.max_parallel`, `limits.max_depth`, `limits.max_total_tokens` | Nothing. NeMo Fabric cannot enforce them, and the line names the component that does. | Follows `if_unsupported`. Refer to [Limits](#limits). |
+| `limits.max_parallel`, `limits.max_depth`, `limits.max_total_tokens` | Nothing. NeMo Fabric cannot enforce them, and the line names the component that does. With a binding that names who enforces it, the line is `bound` and keeps the value. | Follows `if_unsupported` without a binding. Refer to [Limits](#limits). |
 | `skills.<name>` | One `skills.paths` entry, or one `skill` entry of `skills.directories` when the config sets that field: the verified folder. | Follows `if_unsupported`. Refer to [Skills](#skills). |
 | `skills.<name>.variables` | Nothing. | Follows `if_unsupported`. |
 | `connectors.<name>`, carried in the package | `mcp.servers.<key>` as a stdio server. | Follows `if_unsupported`. |
@@ -823,6 +823,7 @@ A key is the place of the declared thing:
 | `agents.<name>` | An agent the agent that runs calls. |
 | `agents.<name>.custom_tools.<tool>` | A custom tool of that called agent. |
 | `agents.<name>.agents.<other>` | An agent that called agent calls. The same pattern goes on at every depth. |
+| `limits.max_depth`, `limits.max_parallel`, `limits.max_total_tokens` | A limit of the agent that runs that NeMo Fabric cannot hold. The value names who enforces it, such as the harness or a model gateway. The line is `bound`, its detail keeps the number, and the load does not stop for it. |
 
 A key is the same whether the agent or its definition states the thing. A value is one line of text, from 1 to 1024 bytes. It can be a Python reference, a registered name, or any text your application reads. The loader keeps it as you wrote it. A key or a value with a control character, a line or paragraph separator, or a format character that hides text or reverses its direction is refused, and so is a key over 1024 bytes.
 
@@ -1090,7 +1091,7 @@ The loader does not do the following. Each one is reported, never dropped.
 | Starting a runtime from a package in a remote environment through the SDK. | Not done. `Fabric.start_runtime_in` takes a config. Refer to [Load a Package in a Sandbox](#load-a-package-in-a-sandbox). |
 | Evaluating policies. | `not_mapped`. A policy is never reported as evaluated. A checker you name can read and apply them before the start. |
 | Installing `packages`, or probing for them. | The line has the status the `packages` fact gives it, and it is `not_mapped` with no fact about its registry. The lock pin is in `digests`. |
-| Enforcing `max_parallel`, `max_depth` and `max_total_tokens`. | `not_mapped`. The line names the component that enforces the limit. |
+| Enforcing `max_parallel`, `max_depth` and `max_total_tokens`. | `not_mapped`. The line names the component that enforces the limit. A binding `limits.<name>` names who does, and the line is `bound`. |
 | Comparing a running connector or agent with its pin. | `could_not_be_checked`. |
 | Writing a model entry for the agent's default model. | The loader only selects an entry your config offers under that name. A config that holds no model has `model.source` as `not_mapped` with the gap `model_not_configured`. |
 | Reporting the model each run used. | The report says what was configured. |
