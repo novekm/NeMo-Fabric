@@ -1009,6 +1009,7 @@ mod tests {
             json!({
                 "hook_event_name": "AgentStart",
                 "agent_name": "code-reviewer",
+                "agent_digest": format!("sha256:{}", report.lock.sha256),
                 "parts": [{
                     "id": "$/skills/review",
                     "type": "skill",
