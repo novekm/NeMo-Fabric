@@ -175,6 +175,8 @@ pub(super) fn start_facts(report: &AgentPackageReport, enforcers_present: &[Stri
     json!({
         "hook_event_name": EVENT,
         "agent_name": report.entry.name,
+        // The package's identity, with the name: a quarantine holds this digest, and a new version has another.
+        "agent_digest": format!("sha256:{}", report.lock.sha256),
         "parts": parts,
         "models": models,
         "policies": policies,

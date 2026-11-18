@@ -1878,6 +1878,12 @@ pub struct StopRequest {
     /// rule asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub violation: Option<Value>,
+    /// Whether the stop is a quarantine: the agent may not start again until
+    /// someone releases it. The run stops the same way; the quarantine itself
+    /// is kept by the checker that refuses later starts, such as the NeMo
+    /// Guardrails hooks server.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub quarantine: bool,
 }
 
 /// The runtime of an agent the lead calls, started apart from the lead,
@@ -1931,6 +1937,9 @@ pub struct StopRecord {
     /// The decision that asked for the stop. None for a kill switch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub violation: Option<Value>,
+    /// Whether the stop is a quarantine.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub quarantine: bool,
     /// The lead first, then each called agent, in the order given.
     pub runtimes: Vec<StoppedRuntime>,
     /// The events of each `stop_runtime`, then the `runtime.stop_requested` event.
@@ -2001,6 +2010,9 @@ pub fn stop_runtime_for(
     if let Some(violation) = &request.violation {
         metadata.insert("violation".to_string(), violation.clone());
     }
+    if request.quarantine {
+        metadata.insert("quarantine".to_string(), Value::Bool(true));
+    }
     metadata.insert(
         "runtimes".to_string(),
         serde_json::to_value(&runtimes).map_err(FabricError::SerializeJson)?,
@@ -2016,6 +2028,7 @@ pub fn stop_runtime_for(
         reason: request.reason.clone(),
         requested_by: request.requested_by.clone(),
         violation: request.violation.clone(),
+        quarantine: request.quarantine,
         runtimes,
         events,
     };
@@ -6832,6 +6845,7 @@ else:
             reason: "tool call 'drop_database' is a stop tool".to_string(),
             requested_by: "nemo-guardrails".to_string(),
             violation,
+            quarantine: false,
         }
     }
 
@@ -6901,6 +6915,7 @@ else:
             reason: "the operator ended the run".to_string(),
             requested_by: "operator".to_string(),
             violation: None,
+            quarantine: false,
         };
 
         let record = stop_runtime_for(&plan, &runtime, &[], &request).unwrap();
@@ -6921,6 +6936,33 @@ else:
     }
 
     #[test]
+    fn a_quarantine_stops_the_run_through_the_same_trigger_and_is_recorded() {
+        let (root, plan) = local_host_plan("success");
+        let runtime = start_runtime(&plan).unwrap();
+        let request = StopRequest {
+            reason: "agent 'release-reviewer' is quarantined: under review".to_string(),
+            requested_by: "platform".to_string(),
+            violation: None,
+            quarantine: true,
+        };
+
+        let record = stop_runtime_for(&plan, &runtime, &[], &request).unwrap();
+
+        fs::remove_dir_all(root).unwrap();
+        assert!(record.quarantine);
+        assert!(record.runtimes[0].stopped);
+        assert!(!local_hosts().contains_key(&runtime.runtime_id));
+        assert_eq!(
+            record.events.last().unwrap().metadata["quarantine"],
+            Value::Bool(true)
+        );
+        assert_eq!(
+            serde_json::to_value(&record).unwrap()["quarantine"],
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
     fn a_stop_that_does_not_say_why_or_who_asked_stops_nothing() {
         let (root, plan) = local_host_plan("success");
         let runtime = start_runtime(&plan).unwrap();
@@ -6932,6 +6974,7 @@ else:
                 reason: reason.to_string(),
                 requested_by: requested_by.to_string(),
                 violation: None,
+                quarantine: false,
             };
             let refused = stop_runtime_for(&plan, &runtime, &[], &request);
             assert!(
