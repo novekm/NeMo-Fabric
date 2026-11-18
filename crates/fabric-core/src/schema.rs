@@ -88,11 +88,15 @@ pub enum SchemaName {
     AgentPackageReport,
     /// Caller options of an agent package load.
     AgentPackageOptions,
+    /// Report of an agent package fetch.
+    AgentPackageFetchReport,
+    /// Caller options of an agent package fetch.
+    AgentPackageFetchOptions,
 }
 
 impl SchemaName {
     /// All public schemas in stable output order.
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 34] = [
         Self::SessionRef,
         Self::ExecutionEvidence,
         Self::CheckRequest,
@@ -125,6 +129,8 @@ impl SchemaName {
         Self::RuntimeResourceSnapshot,
         Self::AgentPackageReport,
         Self::AgentPackageOptions,
+        Self::AgentPackageFetchReport,
+        Self::AgentPackageFetchOptions,
     ];
 
     /// Stable file stem for this schema.
@@ -162,6 +168,8 @@ impl SchemaName {
             Self::RuntimeResourceSnapshot => "runtime-resource-snapshot",
             Self::AgentPackageReport => "agent-package-report",
             Self::AgentPackageOptions => "agent-package-options",
+            Self::AgentPackageFetchReport => "agent-package-fetch-report",
+            Self::AgentPackageFetchOptions => "agent-package-fetch-options",
         }
     }
 
@@ -231,6 +239,12 @@ impl SchemaName {
             }
             "agent-package-report" | "agent_package_report" => Ok(Self::AgentPackageReport),
             "agent-package-options" | "agent_package_options" => Ok(Self::AgentPackageOptions),
+            "agent-package-fetch-report" | "agent_package_fetch_report" => {
+                Ok(Self::AgentPackageFetchReport)
+            }
+            "agent-package-fetch-options" | "agent_package_fetch_options" => {
+                Ok(Self::AgentPackageFetchOptions)
+            }
             _ => Err(FabricError::UnknownSchema {
                 schema: value.to_string(),
                 available: Self::ALL
@@ -282,6 +296,12 @@ pub fn generate_schema(schema: SchemaName) -> Result<Value> {
         }
         SchemaName::AgentPackageOptions => {
             to_value(schema_for!(crate::agent_package::AgentPackageOptions))
+        }
+        SchemaName::AgentPackageFetchReport => {
+            to_value(schema_for!(crate::agent_package::AgentPackageFetchReport))
+        }
+        SchemaName::AgentPackageFetchOptions => {
+            to_value(schema_for!(crate::agent_package::AgentPackageFetchOptions))
         }
     }
 }

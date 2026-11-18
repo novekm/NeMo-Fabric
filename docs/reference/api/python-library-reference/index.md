@@ -30,6 +30,7 @@ SPDX-License-Identifier: Apache-2.0 -->
 - [`capabilities.AdapterInspection`](./nemo_fabric.capabilities.md#class-adapterinspection): Metadata compatibility report; a profile is available only without issues.
 - [`agent_package.AgentPackageDeclaredItem`](./nemo_fabric.agent_package.md#class-agentpackagedeclareditem): One thing a document declares, and what the load did with it.
 - [`agent_package.AgentPackageDigestCheck`](./nemo_fabric.agent_package.md#class-agentpackagedigestcheck): One lock entry and what the load checked about it.
+- [`agent_package.AgentPackageFetchReport`](./nemo_fabric.agent_package.md#class-agentpackagefetchreport): What one agent package fetch placed and what it left.
 - [`agent_package.AgentPackageReport`](./nemo_fabric.agent_package.md#class-agentpackagereport): What one agent package load read, checked and mapped.
 - [`check.CheckReport`](./nemo_fabric.check.md#class-checkreport): Immutable health check report.
 - [`check.CheckRequest`](./nemo_fabric.check.md#class-checkrequest): Select server, runtime, or registered service health.
@@ -122,6 +123,8 @@ SPDX-License-Identifier: Apache-2.0 -->
 ## Functions
 
 - [`capabilities.inspect_adapter`](./nemo_fabric.capabilities.md#function-inspect_adapter): Inspect supplied adapter and optional workflow metadata without loading its SDK.
+- [`agent_package.fetch_agent_package`](./nemo_fabric.agent_package.md#function-fetch_agent_package): Fetch the content the lock of an agent package pins.
+- [`agent_package.fetch_agent_package_from_git`](./nemo_fabric.agent_package.md#function-fetch_agent_package_from_git): Fetch an agent package that is a folder in a git repository.
 - [`agent_package.load_agent_package`](./nemo_fabric.agent_package.md#function-load_agent_package): Read, check and map one agent package. Fetches nothing.
 
 

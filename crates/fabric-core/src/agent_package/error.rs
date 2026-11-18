@@ -50,6 +50,8 @@ pub(crate) enum PackageErrorCode {
     ConfigConflict,
     LockDigestMismatch,
     BindingUndeclared,
+    FetchFailed,
+    OutDirInUse,
 }
 
 impl PackageErrorCode {
@@ -94,6 +96,8 @@ impl PackageErrorCode {
         Self::ConfigConflict,
         Self::LockDigestMismatch,
         Self::BindingUndeclared,
+        Self::FetchFailed,
+        Self::OutDirInUse,
     ];
 
     /// The stable code text.
@@ -137,6 +141,8 @@ impl PackageErrorCode {
             Self::ConfigConflict => "package_config_conflict",
             Self::LockDigestMismatch => "package_lock_digest_mismatch",
             Self::BindingUndeclared => "package_binding_undeclared",
+            Self::FetchFailed => "package_fetch_failed",
+            Self::OutDirInUse => "package_out_dir_in_use",
         }
     }
 }
@@ -197,7 +203,7 @@ mod tests {
                 "{text}"
             );
         }
-        assert_eq!(seen.len(), 38);
+        assert_eq!(seen.len(), 40);
     }
 
     #[test]

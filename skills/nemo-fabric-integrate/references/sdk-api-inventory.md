@@ -72,6 +72,19 @@ is a `report.declared` line with status `bound` and the target in `bound_to`;
 the mapped config does not hold the bindings. See the
 [agent packages guide](https://github.com/NVIDIA/NeMo-Fabric/blob/main/docs/sdk/agent-packages.mdx).
 
+The public `fetch_agent_package(package_dir, out_dir, *, entry=..., expected_lock_sha256=..., oci_layout=...)`
+function is synchronous. It and `fetch_agent_package_from_git` are the only
+package functions that use the network. It completes a package from its own
+lock: content the lock pins from git is fetched at the pinned commit with the
+`git` program, and content pinned as an OCI artifact is read from the image
+layout folder given as `oci_layout`. Everything placed is checked against the
+digest the lock pins before `out_dir` is written, and `out_dir` holds what the
+lock pins and nothing else. `fetch_agent_package_from_git(source, ref, out_dir)`
+takes the same options and first fetches a package that is itself a folder in
+a git repository: `source` is the text `git::<repository>//<folder>`. Both
+return an immutable `AgentPackageFetchReport`: load its `package_dir`, and
+pass its `lock["sha256"]` to `load_agent_package` as `expected_lock_sha256`.
+
 OpenShell environments use `start_runtime_in` with a prepared or attached
 handle. They support buffered invocation and multiple independent bridge
 runtime IDs per sandbox. Invocations for different runtime IDs can proceed

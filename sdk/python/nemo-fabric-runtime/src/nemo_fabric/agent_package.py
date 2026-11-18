@@ -491,6 +491,238 @@ def _load_report(
         ) from error
 
 
+class AgentPackageFetchReport(FabricMapping):
+    """What one agent package fetch placed and what it left.
+
+    Attributes:
+        package_dir: The folder to load, absolute. It is ``out_dir`` when
+            something was placed, else the package folder as it was given.
+        lock: The lock file of that folder, with its path, sha256, generator
+            and entry count. Keep ``lock["sha256"]`` and pass it to
+            ``load_agent_package`` as ``expected_lock_sha256``.
+        fetched: One row for each lock entry whose content was fetched,
+            placed and checked against the digest the lock pins. A row has
+            ``address``, ``entry_type``, ``source_url``, ``source_subpath``,
+            ``commit``, ``digest`` and ``path``.
+        not_fetched: One row for each lock entry whose content is still not
+            in the folder. A row has ``address``, ``entry_type``,
+            ``source_type``, ``source_url`` and ``reason``.
+    """
+
+    package_dir: Path
+    lock: Mapping[str, Any]
+    fetched: Sequence[Mapping[str, Any]]
+    not_fetched: Sequence[Mapping[str, Any]]
+    _fields = frozenset({"package_dir", "lock", "fetched", "not_fetched"})
+
+    @classmethod
+    def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
+        if "package_dir" not in data:
+            raise FabricConfigError("AgentPackageFetchReport package_dir is required")
+        data["package_dir"] = Path(data["package_dir"])
+        return data
+
+
+def fetch_agent_package(
+    package_dir: str | os.PathLike[str],
+    out_dir: str | os.PathLike[str],
+    *,
+    entry: str | os.PathLike[str] | None = None,
+    expected_lock_sha256: str | None = None,
+    oci_layout: str | os.PathLike[str] | None = None,
+) -> AgentPackageFetchReport:
+    """Fetch the content the lock of an agent package pins.
+
+    A lock can pin a part, a called agent or the agent of a definition from a
+    git repository or an OCI registry without the folder holding its bytes.
+    This function gets those bytes and nothing else: it resolves no version,
+    writes no lock and installs nothing. ``load_agent_package`` then loads
+    the result, and still never uses the network.
+
+    The package is read first, so a package that a load would refuse is
+    refused before any network use. Each pinned commit is fetched with the
+    ``git`` program and the sign-in it already has. Git's own prompt is
+    turned off, and only the ``https``, ``ssh`` and ``file`` transports are
+    used. A program git starts, such as ``ssh``, can still ask on a terminal.
+    Each folder is read as the bytes git stores and placed at the path of its
+    lock address in a copy of the package. The copy is then read like any
+    package, so every entry in it has the digest its lock entry pins. Only
+    then does the copy become ``out_dir``. A fetch that is refused leaves
+    nothing.
+
+    The copy holds what the lock pins: the lock file, the entry document and
+    the content of every entry the folder already holds. A file of the
+    package folder that no entry pins is not copied.
+
+    No registry is asked for OCI content. It is read from ``oci_layout``, a
+    folder in the OCI image layout form that you fill with the tool you sign
+    in to the registry with. The artifact is the manifest the lock's digest
+    names, with one layer that is a tar archive and is not compressed. Its
+    files are unpacked at the path of the lock address. Its blobs are kept
+    in ``.oci`` at the root of the package, and a load uses them to check
+    the files against the lock's digest again. Keeping them there is how
+    NeMo Fabric does it: the package format does not say where they go.
+
+    The call is synchronous and can take as long as the fetches do. An async
+    caller uses ``asyncio.to_thread``.
+
+    Args:
+        package_dir: The package folder. It is never written to.
+        out_dir: Where the complete package is written. It must be missing or
+            empty, and outside ``package_dir``.
+        entry: The entry document, as a path inside the package, when it is
+            not at the root.
+        expected_lock_sha256: The sha256 the caller holds for the lock file,
+            as for ``load_agent_package``. A lock file with another digest is
+            refused before anything is fetched.
+        oci_layout: A folder in the OCI image layout form that holds the
+            artifacts the lock pins from an OCI registry. With ``None``, OCI
+            content is not fetched and is listed in ``not_fetched``.
+
+    Returns:
+        An ``AgentPackageFetchReport``. Load its ``package_dir``. When
+        nothing was placed, that is ``package_dir`` as it was given, and
+        ``out_dir`` is not created.
+
+    Raises:
+        FabricConfigError: If the package or the fetch is refused. ``stage``
+            is ``agent_package`` and ``details["subject"]`` names the thing
+            the refusal is about. ``code`` is one of the codes a load uses,
+            such as ``package_digest_mismatch`` for fetched bytes that do not
+            have the pinned digest, or ``package_file_unreadable`` for an
+            artifact in a form that is not read. It is
+            ``package_fetch_failed`` when a required entry cannot be
+            fetched, and ``package_out_dir_in_use`` when ``out_dir`` holds
+            something.
+            An optional entry that cannot be fetched is not an error. It is a
+            row of ``not_fetched``. Fetched bytes that do not have the
+            pinned digest are an error for an optional entry too.
+        FabricNativeUnavailableError: If the native extension is not
+            installed.
+    """
+
+    from nemo_fabric.client import Fabric
+
+    folder = os.fspath(package_dir)
+    if folder.startswith("git::"):
+        raise FabricConfigError(
+            "A package in a git repository is fetched with"
+            " fetch_agent_package_from_git",
+            stage=_STAGE,
+            code="package_options_invalid",
+            details={"subject": "package_dir"},
+        )
+    options = _fetch_options(entry, expected_lock_sha256, oci_layout)
+    native = Fabric()._require_native_module("fetch_agent_package")
+    return _fetch_report(
+        lambda: native.fetch_agent_package(folder, os.fspath(out_dir), options)
+    )
+
+
+def fetch_agent_package_from_git(
+    source: str,
+    ref: str,
+    out_dir: str | os.PathLike[str],
+    *,
+    entry: str | os.PathLike[str] | None = None,
+    expected_lock_sha256: str | None = None,
+    oci_layout: str | os.PathLike[str] | None = None,
+) -> AgentPackageFetchReport:
+    """Fetch an agent package that is a folder in a git repository.
+
+    The folder is read at ``ref`` as the bytes git stores and written whole
+    to ``out_dir``. It is then read as a package and completed from its own
+    lock, as ``fetch_agent_package`` completes a folder. A folder that is not
+    a package is refused, and nothing is left in ``out_dir``.
+
+    Nothing you hold pins a package that is fetched this way, and a tag or a
+    branch is a name the repository can move. The first row of ``fetched``
+    has the address ``$`` and the commit the folder was read at. To pin more,
+    pass ``expected_lock_sha256``.
+
+    The call is synchronous and can take as long as the fetches do. An async
+    caller uses ``asyncio.to_thread``.
+
+    Args:
+        source: The git source of the package, written the way a document
+            writes one: ``git::<repository>//<folder>``. It is text, never a
+            path object.
+        ref: The tag, the branch or the full commit to read the folder at.
+        out_dir: Where the package is written. It must be missing or empty.
+        entry: The entry document, as a path inside the package, when it is
+            not at the root.
+        expected_lock_sha256: The sha256 the caller holds for the lock file
+            of the package. A lock file with another digest is refused.
+        oci_layout: A folder in the OCI image layout form that holds the
+            artifacts the lock pins from an OCI registry.
+
+    Returns:
+        An ``AgentPackageFetchReport``. Its ``package_dir`` is ``out_dir``.
+
+    Raises:
+        FabricConfigError: If the source, the package or the fetch is
+            refused, with the codes ``fetch_agent_package`` uses. ``code`` is
+            ``package_options_invalid`` when ``source`` is not a git source
+            or is not text.
+        FabricNativeUnavailableError: If the native extension is not
+            installed.
+    """
+
+    from nemo_fabric.client import Fabric
+
+    for name, value in (("source", source), ("ref", ref)):
+        # A path object folds the ``//`` of a source into ``/``.
+        if not isinstance(value, str):
+            raise FabricConfigError(
+                f"The agent package option {name} must be text",
+                stage=_STAGE,
+                code="package_options_invalid",
+                details={"subject": name},
+            )
+    options = _fetch_options(entry, expected_lock_sha256, oci_layout)
+    native = Fabric()._require_native_module("fetch_agent_package_from_git")
+    return _fetch_report(
+        lambda: native.fetch_agent_package_from_git(
+            source, ref, os.fspath(out_dir), options
+        )
+    )
+
+
+def _fetch_options(
+    entry: str | os.PathLike[str] | None,
+    expected_lock_sha256: str | None,
+    oci_layout: str | os.PathLike[str] | None,
+) -> str:
+    """Write the options of a fetch as the JSON object the core reads."""
+
+    options: dict[str, Any] = {}
+    if entry is not None:
+        options["entry"] = _option_path("entry", entry)
+    if expected_lock_sha256 is not None:
+        options["expected_lock_sha256"] = expected_lock_sha256
+    if oci_layout is not None:
+        options["oci_layout"] = _option_path("oci_layout", oci_layout)
+    return json.dumps(options)
+
+
+def _fetch_report(fetch: Callable[[], str]) -> AgentPackageFetchReport:
+    """Run a native fetch and return its report, or raise its refusal."""
+
+    try:
+        raw = fetch()
+    except FabricError:
+        raise
+    except Exception as error:
+        details = getattr(error, "details", None)
+        raise FabricConfigError(
+            str(error),
+            stage=_STAGE,
+            code=getattr(error, "code", None),
+            details=details if isinstance(details, Mapping) else None,
+        ) from error
+    return AgentPackageFetchReport.from_mapping(json.loads(raw))
+
+
 def _option_path(name: str, value: Any) -> str:
     """Return an option that is given as a path as text, or refuse it by name."""
 

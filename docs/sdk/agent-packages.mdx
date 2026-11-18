@@ -11,7 +11,7 @@ The loader fetches nothing and resolves nothing. It takes a package that is alre
 
 Know these limits before you start:
 
-- **Content from an OCI registry or a package registry is not used as it is.** Such content is pinned by an artifact digest, which cannot be worked out from files alone. A part pinned that way is reported and not loaded. A definition whose agent is pinned that way does not load at all: the loader refuses it with `package_agent_unavailable`. Content that is in the package folder works, whether it is local or was fetched from git and placed there.
+- **Content from an OCI registry or a package registry is not used as it is.** Such content is pinned by an artifact digest, which cannot be worked out from files alone. A part pinned that way is reported and not loaded, unless a fetch unpacked it and kept its artifact in the package. A definition whose agent is pinned that way does not load at all: the loader refuses it with `package_agent_unavailable`. Content that is in the package folder works, whether it is local or was fetched from git and placed there. Refer to [Fetch What a Lock Pins](#fetch-what-a-lock-pins).
 - **Your config names the models.** A config that sets `models["default"]` chooses the model. A config that sets none can offer several models by name, and the loader selects the one the agent declares. The loader writes no model of its own. Refer to [The Model](#the-model).
 - **Plugins, hooks and called agents go only to an adapter that takes them.** The loader hands each one to the adapter under a key the adapter's descriptor declares. On an adapter that declares no such key, a package with one of them does not load by default. Refer to [Plugins, Hooks and Called Agents](#plugins-hooks-and-called-agents).
 - **A custom tool needs code from you.** The package describes the tool, and you supply it: with a `tools.definitions` entry on an adapter that accepts one, or with a binding. Refer to [Custom Tools](#custom-tools).
@@ -39,7 +39,7 @@ Each document names its schema in `$schema`. The loader accepts only the schema 
 
 A lock digest is `sha256:` and 64 hexadecimal characters. For a file it is the SHA-256 of the file's bytes. For a folder it is the SHA-256 of a compact JSON array of `[path, file digest]` pairs, one for every file under the folder, sorted by path.
 
-A part with a local source is at the path its source names. A part with a git source is looked for at the path of its lock address, below the folder of the entry document: the part at `$/skills/release-notes` is the folder `skills/release-notes/`. Place the fetched content there, and the loader checks it against the pinned digest like any other part. A git part that is not there is reported as `absent`.
+A part with a local source is at the path its source names. A part with a git source is looked for at the path of its lock address, below the folder of the entry document: the part at `$/skills/release-notes` is the folder `skills/release-notes/`. Place the fetched content there, and the loader checks it against the pinned digest like any other part. `fetch_agent_package` places it for you: refer to [Fetch What a Lock Pins](#fetch-what-a-lock-pins). A git part that is not there is reported as `absent`.
 
 The [agent package example](https://github.com/NVIDIA/NeMo-Fabric/tree/main/examples/agent_package) holds a complete package with one skill, one carried connector and one definition.
 
@@ -153,6 +153,159 @@ The command loads and starts in one step. With `if_unsupported` set to `warn`, t
 `Fabric.start_runtime_in` does not load packages. To start from a package in a remote environment, send the `fabric-agent-ctl start --package` command to that environment yourself.
 
 Refer to the [runtime server command guide](https://github.com/NVIDIA/NeMo-Fabric/blob/main/sdk/python/nemo-fabric-runtime/src/nemo_fabric/runtime_server/README.md) for the full command syntax.
+
+## Fetch What a Lock Pins
+
+A lock can pin a skill, a policy, a called agent or the agent of a definition from a git repository or an OCI registry. The package folder does not have to hold those bytes. `fetch_agent_package` gets them, and it is a step of its own: `load_agent_package` still fetches nothing and never uses the network.
+
+The fetch needs the `git` program and nothing else. It does not need the tool that wrote the package: a lock written by hand works the same.
+
+The following example completes a video producer package whose skill and policy are pinned from git, and then loads the result:
+
+```python
+from nemo_fabric import fetch_agent_package, load_agent_package
+
+fetched = fetch_agent_package("packages/video-producer", "build/video-producer")
+for row in fetched.fetched:
+    print(row["address"], row["commit"], row["path"])
+
+report = load_agent_package(
+    fetched.package_dir,
+    config,
+    expected_lock_sha256=fetched.lock["sha256"],
+)
+```
+
+Always load `fetched.package_dir`. When something was placed it is `out_dir`. When nothing was placed it is the package folder as you gave it, and `out_dir` is not created.
+
+The fetch works in this order:
+
+1. Read the package as a load does: the documents, the lock, every pin, and `expected_lock_sha256` when you give it. A package that a load would refuse is refused here, before any network use.
+2. Copy what the lock pins to a work folder beside `out_dir`: the lock file, the entry document, and the content of every entry the folder already holds. A file that no entry pins is not copied. The package folder you gave is never written to.
+3. For each lock entry with a git source whose bytes are not in the folder, fetch the pinned commit with `git`. What comes back must be exactly that commit.
+4. Read the pinned folder as the bytes git stores. Nothing is checked out, so no attribute or filter of the repository changes a byte. Only regular files are taken, and a file keeps its executable mark.
+5. Place the content at the path of its lock address in the copy. For an agent, the content is its document, `agent.json`, and nothing beside it.
+6. Read the copy again as a load does. Every entry in it must have the digest its lock entry pins. An agent's document that was just placed can show more entries, so this repeats until none is left.
+7. Rename the copy to `out_dir`.
+
+The remote decides which bytes arrive. The digest in the lock decides whether they are used. A fetch that is refused at any step leaves nothing behind, and removes each folder it made on the way to `out_dir`.
+
+The fetch also follows these rules:
+
+- **`out_dir` must be missing or empty**, and outside the package folder. A link and `..` are followed before the two are compared. Otherwise the fetch is refused with `package_out_dir_in_use`.
+- **`out_dir` holds what the lock pins and nothing else.** A render, a link or the folder of a repository beside the documents is not copied and is never in the way. A folder with more than one entry document gives the package of the entry you named.
+- **An optional entry that cannot be fetched does not stop the fetch.** It is a row of `not_fetched`, with the reason. A required one is refused with `package_fetch_failed`. Bytes that arrive and do not have the pinned digest are refused with `package_digest_mismatch`, for an optional entry too.
+- **The fetch selects nothing.** It resolves no version, reads no tag for a lock entry and writes no lock. It keeps no cache: a second call fetches again.
+- **Sign-in stays with `git`.** NeMo Fabric reads no credential. `git` uses the credential helper or the SSH agent you already have. Its own prompt is turned off, it follows no submodule, and it uses only the `https`, `ssh` and `file` transports. A program that `git` starts, such as `ssh`, can still ask on a terminal for a passphrase or a host key. Where nobody can answer, use a key the SSH agent holds and a host that is already known.
+- **One `git fetch` can run for five minutes.** The limit ends `git`. An address that did not answer is not asked again for the next entry of the same fetch.
+- **Neither a message nor a report shows a password** that an address carries before its host, as in `https://user:password@host/...`. A load report leaves it out too. Every other part of an address is shown as it is written.
+- **The same bounds as a load hold**: a document is at most 4 MiB, and a folder holds at most 50,000 files, at most 64 levels deep and at most 1 GiB in all. A symbolic link or a submodule in a fetched folder is refused. So are two files of a fetched folder whose names differ only in case, on a file system that does not keep case.
+
+`fetch_agent_package` is synchronous. From asynchronous code, call it with `asyncio.to_thread`. In Rust, the same step is `nemo_fabric_core::fetch_agent_package`. The shapes of the options and of the report are the schemas `sdk/agent-package-fetch-options` and `sdk/agent-package-fetch-report`.
+
+### The Fetch Report
+
+`fetch_agent_package` returns an `AgentPackageFetchReport`.
+
+| Member | What it holds |
+| --- | --- |
+| `package_dir` | The folder to load. |
+| `lock` | The lock file of that folder: `path`, `sha256`, `generator` and `entries`. Keep `sha256` and pass it to `load_agent_package` as `expected_lock_sha256`. |
+| `fetched` | One row for each lock entry that was placed and checked: `address`, `entry_type`, `source_url`, `source_subpath`, `commit`, `digest` and `path`. |
+| `not_fetched` | One row for each lock entry whose content is still not in the folder: `address`, `entry_type`, `source_type`, `source_url` and `reason`. |
+
+### A Definition Whose Agent Is Shared
+
+A definition can point at an agent that a team keeps in git. The folder you are handed then holds two files:
+
+```text
+video-producer-short/
+  agent-definition.json    "agent": {"source": "git::https://git.example.com/media-team/agents.git//video-producer", "version": "~> 2.1"}
+  oadl.lock.json           $, $/agent, $/agent/skills/storyboard
+```
+
+A load refuses this folder with `package_agent_unavailable`, because the agent is not in it. The lock already holds what the fetch needs: the commit and the digest of the agent's document at `$/agent`, and of the agent's own skill at `$/agent/skills/storyboard`.
+
+```python
+fetched = fetch_agent_package("video-producer-short", "build/video-producer-short")
+report = load_agent_package(fetched.package_dir, config)
+```
+
+The fetch places the agent's document first. Reading it shows the agent's skill, which the fetch places next. The result is a folder that loads:
+
+```text
+build/video-producer-short/
+  agent-definition.json
+  oadl.lock.json
+  agent/agent.json
+  agent/skills/storyboard/SKILL.md
+```
+
+A called agent with a git source is completed the same way, at `agents/<name>/agent.json`.
+
+A part that two documents use has one lock entry, at the first of its addresses in sort order. For a checklist that a code review lead and its `reviewer` both use, that is `$/agents/reviewer/skills/checklist`. While the reviewer's document is not in the folder, a load takes the lead's checklist at that address, and the fetch places it at `agents/reviewer/skills/checklist`. After the reviewer's document is there, the lock must match what it says.
+
+### Content From an OCI Registry
+
+The lock entry of an OCI source holds one digest: the digest of the artifact's manifest. NeMo Fabric has no registry client. Copy the artifacts into a folder in the OCI image layout form with the tool you sign in to the registry with, and pass that folder as `oci_layout`:
+
+```python
+fetched = fetch_agent_package(
+    "packages/video-producer",
+    "build/video-producer",
+    oci_layout="build/oci-layout",
+)
+```
+
+The package format does not say what an OCI artifact holds. The fetch reads one shape, and refuses any other with `package_file_unreadable` and a message that names what it found. A blob whose bytes do not have the digest it is named by is refused with `package_digest_mismatch`.
+
+- The manifest is the blob that the lock's digest names, at `blobs/sha256/<digest>`. Its bytes must have that digest. It is one OCI image manifest. An image index is not read.
+- The manifest has one layer with the media type `application/vnd.oci.image.layer.v1.tar`: a tar archive that is not compressed. The layer's bytes must have the digest and the size the manifest gives. A compressed layer is not read.
+- The archive holds the part's files at its root: regular files and folders only, each path once.
+
+The fetch unpacks the files at the path of the lock address and copies the blobs it used into `.oci` at the root of the package. That folder is an image layout of its own, and it goes wherever the package goes. Keeping the blobs in `.oci` is how NeMo Fabric does it: the package format does not say where they go, so another tool does not look there.
+
+A load then checks the content itself. When `.oci` holds the manifest of the lock's digest, the loader walks from that digest to the layer and to the files in it again, and compares them with the files in the package. The same files give `verified` in `digests`, and the part maps like any other. A file that was changed, added or removed gives `package_digest_mismatch`. With no `.oci` folder, the content is `not_verifiable` and is not used.
+
+Without `oci_layout`, OCI content is not fetched. Each such entry is a row of `not_fetched`.
+
+An artifact in the shape that is read is one tar file, pushed as the layer with the media type above. Push the tar file, not the folder: a tool that packs a folder itself can compress the layer, and a compressed layer is refused. The following command makes the tar file from the folder `plugins/remotion`:
+
+```bash
+COPYFILE_DISABLE=1 tar -cf remotion.tar -C plugins/remotion .
+```
+
+`COPYFILE_DISABLE=1` keeps `tar` on macOS from adding a `._` file beside each file. Elsewhere it changes nothing. Push the tar file as that layer with the tool you sign in to the registry with, and copy the artifact into an OCI image layout folder with the same tool, keeping its digest. The fetch reads that folder and asks no registry.
+
+Two things pinned by an artifact digest are still not fetched:
+
+- **An agent pinned as an OCI artifact.** The lock holds one digest for the artifact and none for the agent's document, so the loader does not read it. A definition whose agent is pinned that way is refused with `package_agent_unavailable`, as before.
+- **A software package** from a package registry such as PyPI or npm. The tool of that registry installs it.
+
+### A Package That Is Itself in Git
+
+The package can be a folder in a git repository. `fetch_agent_package_from_git` takes its git source, written the way a document writes one, and the tag, the branch or the full commit to read it at. The source is text, never a path object:
+
+```python
+from nemo_fabric import fetch_agent_package_from_git
+
+fetched = fetch_agent_package_from_git(
+    "git::https://git.example.com/media-team/agents.git//video-producer",
+    "v2.1.0",
+    "build/video-producer",
+)
+print(fetched.fetched[0]["commit"], fetched.lock["sha256"])
+```
+
+The folder is read at that commit as the bytes git stores, written whole to `out_dir`, read as a package, and then completed from its own lock as above. The first row of `fetched` has the address `$` and the commit the folder was read at.
+
+Nothing you hold pins a package that is fetched this way, and a tag or a branch is a name the repository can move. To pin more, pass the `lock.sha256` you recorded as `expected_lock_sha256`. A package whose lock file has another digest is refused, and nothing is left in `out_dir`. In Rust, this is `nemo_fabric_core::fetch_agent_package_from_git`.
+
+A package that is itself an OCI artifact, or a package named in a catalog, is not fetched here: the core has no HTTP client, and this step adds no dependency to get one. Get the folder with the registry's own tool, then pass the folder to `fetch_agent_package`.
+
+### Fetch on the Host, Start in the Sandbox
+
+A sandbox often has no network, so `fabric-agent-ctl` has no fetch flag. Fetch where the network is, move `out_dir` into the sandbox, and start there with `fabric-agent-ctl start --package`. The result of a fetch is a plain folder with no absolute path in it, so it can be copied or mounted. Load it in the environment the agent runs in, as for any package.
 
 ## What the Loader Does
 

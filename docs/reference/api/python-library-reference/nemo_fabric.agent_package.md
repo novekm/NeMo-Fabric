@@ -78,6 +78,105 @@ The call is synchronous. With ``check_machine=True`` it can take a few seconds; 
 ---
 
 
+## <kbd>function</kbd> `fetch_agent_package`
+
+```python
+fetch_agent_package(
+    package_dir: 'str | PathLike[str]',
+    out_dir: 'str | PathLike[str]',
+    entry: 'str | PathLike[str] | None' = None,
+    expected_lock_sha256: 'str | None' = None,
+    oci_layout: 'str | PathLike[str] | None' = None
+) → AgentPackageFetchReport
+```
+
+Fetch the content the lock of an agent package pins.
+
+A lock can pin a part, a called agent or the agent of a definition from a git repository or an OCI registry without the folder holding its bytes. This function gets those bytes and nothing else: it resolves no version, writes no lock and installs nothing. ``load_agent_package`` then loads the result, and still never uses the network.
+
+The package is read first, so a package that a load would refuse is refused before any network use. Each pinned commit is fetched with the ``git`` program and the sign-in it already has. Git's own prompt is turned off, and only the ``https``, ``ssh`` and ``file`` transports are used. A program git starts, such as ``ssh``, can still ask on a terminal. Each folder is read as the bytes git stores and placed at the path of its lock address in a copy of the package. The copy is then read like any package, so every entry in it has the digest its lock entry pins. Only then does the copy become ``out_dir``. A fetch that is refused leaves nothing.
+
+The copy holds what the lock pins: the lock file, the entry document and the content of every entry the folder already holds. A file of the package folder that no entry pins is not copied.
+
+No registry is asked for OCI content. It is read from ``oci_layout``, a folder in the OCI image layout form that you fill with the tool you sign in to the registry with. The artifact is the manifest the lock's digest names, with one layer that is a tar archive and is not compressed. Its files are unpacked at the path of the lock address. Its blobs are kept in ``.oci`` at the root of the package, and a load uses them to check the files against the lock's digest again. Keeping them there is how NeMo Fabric does it: the package format does not say where they go.
+
+The call is synchronous and can take as long as the fetches do. An async caller uses ``asyncio.to_thread``.
+
+
+
+**Args:**
+
+ - <b>`package_dir`</b>:  The package folder. It is never written to.
+ - <b>`out_dir`</b>:  Where the complete package is written. It must be missing or  empty, and outside ``package_dir``.
+ - <b>`entry`</b>:  The entry document, as a path inside the package, when it is  not at the root.
+ - <b>`expected_lock_sha256`</b>:  The sha256 the caller holds for the lock file,  as for ``load_agent_package``. A lock file with another digest is  refused before anything is fetched.
+ - <b>`oci_layout`</b>:  A folder in the OCI image layout form that holds the  artifacts the lock pins from an OCI registry. With ``None``, OCI  content is not fetched and is listed in ``not_fetched``.
+
+
+
+**Returns:**
+ An ``AgentPackageFetchReport``. Load its ``package_dir``. When nothing was placed, that is ``package_dir`` as it was given, and ``out_dir`` is not created.
+
+
+
+**Raises:**
+
+ - <b>`FabricConfigError`</b>:  If the package or the fetch is refused. ``stage``  is ``agent_package`` and ``details["subject"]`` names the thing  the refusal is about. ``code`` is one of the codes a load uses,  such as ``package_digest_mismatch`` for fetched bytes that do not  have the pinned digest, or ``package_file_unreadable`` for an  artifact in a form that is not read. It is  ``package_fetch_failed`` when a required entry cannot be  fetched, and ``package_out_dir_in_use`` when ``out_dir`` holds  something.  An optional entry that cannot be fetched is not an error. It is a  row of ``not_fetched``. Fetched bytes that do not have the  pinned digest are an error for an optional entry too.
+ - <b>`FabricNativeUnavailableError`</b>:  If the native extension is not  installed.
+
+
+---
+
+
+## <kbd>function</kbd> `fetch_agent_package_from_git`
+
+```python
+fetch_agent_package_from_git(
+    source: 'str',
+    ref: 'str',
+    out_dir: 'str | PathLike[str]',
+    entry: 'str | PathLike[str] | None' = None,
+    expected_lock_sha256: 'str | None' = None,
+    oci_layout: 'str | PathLike[str] | None' = None
+) → AgentPackageFetchReport
+```
+
+Fetch an agent package that is a folder in a git repository.
+
+The folder is read at ``ref`` as the bytes git stores and written whole to ``out_dir``. It is then read as a package and completed from its own lock, as ``fetch_agent_package`` completes a folder. A folder that is not a package is refused, and nothing is left in ``out_dir``.
+
+Nothing you hold pins a package that is fetched this way, and a tag or a branch is a name the repository can move. The first row of ``fetched`` has the address ``$`` and the commit the folder was read at. To pin more, pass ``expected_lock_sha256``.
+
+The call is synchronous and can take as long as the fetches do. An async caller uses ``asyncio.to_thread``.
+
+
+
+**Args:**
+
+ - <b>`source`</b>:  The git source of the package, written the way a document
+ - <b>`writes one`</b>:  ``git::<repository>//<folder>``. It is text, never a path object.
+ - <b>`ref`</b>:  The tag, the branch or the full commit to read the folder at.
+ - <b>`out_dir`</b>:  Where the package is written. It must be missing or empty.
+ - <b>`entry`</b>:  The entry document, as a path inside the package, when it is  not at the root.
+ - <b>`expected_lock_sha256`</b>:  The sha256 the caller holds for the lock file  of the package. A lock file with another digest is refused.
+ - <b>`oci_layout`</b>:  A folder in the OCI image layout form that holds the  artifacts the lock pins from an OCI registry.
+
+
+
+**Returns:**
+ An ``AgentPackageFetchReport``. Its ``package_dir`` is ``out_dir``.
+
+
+
+**Raises:**
+
+ - <b>`FabricConfigError`</b>:  If the source, the package or the fetch is  refused, with the codes ``fetch_agent_package`` uses. ``code`` is  ``package_options_invalid`` when ``source`` is not a git source  or is not text.
+ - <b>`FabricNativeUnavailableError`</b>:  If the native extension is not  installed.
+
+
+---
+
+
 ## <kbd>class</kbd> `AgentPackageDeclaredItem`
 
 One thing a document declares, and what the load did with it.
@@ -286,6 +385,44 @@ Use ``base_dir`` of this report as the base directory of that call.
 **Raises:**
 
  - <b>`FabricConfigError`</b>:  With code ``package_requirements_unmet`` when a  required thing stopped the load, and with code  ``package_config_required`` when the package was loaded  without a config.
+
+
+---
+
+
+## <kbd>class</kbd> `AgentPackageFetchReport`
+
+What one agent package fetch placed and what it left.
+
+
+
+**Attributes:**
+
+ - <b>`package_dir`</b>:  The folder to load, absolute. It is ``out_dir`` when  something was placed, else the package folder as it was given.
+ - <b>`lock`</b>:  The lock file of that folder, with its path, sha256, generator  and entry count. Keep ``lock["sha256"]`` and pass it to  ``load_agent_package`` as ``expected_lock_sha256``.
+ - <b>`fetched`</b>:  One row for each lock entry whose content was fetched,  placed and checked against the digest the lock pins. A row has  ``address``, ``entry_type``, ``source_url``, ``source_subpath``,  ``commit``, ``digest`` and ``path``.
+ - <b>`not_fetched`</b>:  One row for each lock entry whose content is still not  in the folder. A row has ``address``, ``entry_type``,  ``source_type``, ``source_url`` and ``reason``.
+
+
+
+### Fields
+
+The mapping exposes the following typed fields:
+
+| Field | Type |
+| --- | --- |
+| `package_dir` | `Path` |
+| `lock` | `Mapping[str, Any]` |
+| `fetched` | `Sequence[Mapping[str, Any]]` |
+| `not_fetched` | `Sequence[Mapping[str, Any]]` |
+
+---
+
+### <kbd>property</kbd> extra_fields
+
+Return an immutable view of preserved extension fields.
+
+
 
 
 

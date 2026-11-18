@@ -22,6 +22,17 @@ def load_agent_package(
     options_json: str,
     base_dir: str | None = None,
 ) -> str: ...
+def fetch_agent_package(
+    package_dir: str,
+    out_dir: str,
+    options_json: str,
+) -> str: ...
+def fetch_agent_package_from_git(
+    source: str,
+    git_ref: str,
+    out_dir: str,
+    options_json: str,
+) -> str: ...
 def run_config(
     config_json: str,
     base_dir: str | None = None,

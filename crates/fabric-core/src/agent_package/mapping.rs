@@ -956,7 +956,7 @@ impl<'a> Mapper<'a> {
             (Integrity::Verified, Some(path)) => Ok((part, path.clone())),
             (Integrity::Absent, _) => Err((
                 MappingGap::ContentAbsent,
-                "the content is pinned and is not in the package; the loader fetches nothing"
+                "the content is pinned and is not in the package; the loader fetches nothing, `fetch_agent_package` does"
                     .to_string(),
             )),
             (Integrity::NotVerifiable, _) => Err((
@@ -1784,7 +1784,7 @@ impl<'a> Mapper<'a> {
                 (_, None, Some(Integrity::Absent)) => item.not_mapped(
                     MappingGap::ContentAbsent,
                     format!(
-                        "{not_applied}the agent's document is pinned and is not in the package; the loader fetches nothing"
+                        "{not_applied}the agent's document is pinned and is not in the package; the loader fetches nothing, `fetch_agent_package` does"
                     ),
                 ),
                 (_, None, Some(Integrity::NotVerifiable)) => item.not_mapped(

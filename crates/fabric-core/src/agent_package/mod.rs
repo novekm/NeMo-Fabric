@@ -12,6 +12,7 @@ mod digest;
 mod document;
 mod error;
 mod facts;
+mod fetch;
 mod graph;
 mod json;
 mod load;
@@ -31,6 +32,10 @@ mod version;
 #[cfg(test)]
 mod conformance;
 
+pub use fetch::{
+    AgentPackageFetchOptions, AgentPackageFetchReport, FetchedContent, NotFetchedContent,
+    fetch_agent_package, fetch_agent_package_from_git,
+};
 pub use load::{load_agent_package, load_agent_package_with_adapter_directories};
 pub use model::{
     DigestKind, DocumentKind, DocumentRecord, EntryType, Integrity, LockInterface, LockRecord,

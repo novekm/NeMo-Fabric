@@ -244,7 +244,7 @@ pub(crate) fn read_package(
                         "it is pinned by an artifact digest, which cannot be worked out from files"
                     }
                     Some(Integrity::Absent) => {
-                        "its content is not in the package, and the loader fetches nothing"
+                        "its content is not in the package, and the loader fetches nothing: `fetch_agent_package` does"
                     }
                     _ => "its document was not read",
                 };

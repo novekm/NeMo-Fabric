@@ -1,0 +1,232 @@
+{
+  "$defs": {
+    "EntryType": {
+      "description": "The type of one lock entry.",
+      "oneOf": [
+        {
+          "const": "skill",
+          "description": "A skill folder.",
+          "type": "string"
+        },
+        {
+          "const": "plugin",
+          "description": "A plugin.",
+          "type": "string"
+        },
+        {
+          "const": "connector",
+          "description": "A connector (an MCP server).",
+          "type": "string"
+        },
+        {
+          "const": "hook",
+          "description": "A hook folder.",
+          "type": "string"
+        },
+        {
+          "const": "package",
+          "description": "A software package fetched from its own registry.",
+          "type": "string"
+        },
+        {
+          "const": "policy",
+          "description": "A policy package.",
+          "type": "string"
+        },
+        {
+          "const": "agent",
+          "description": "An agent document.",
+          "type": "string"
+        },
+        {
+          "const": "agent-definition",
+          "description": "A definition document.",
+          "type": "string"
+        },
+        {
+          "const": "model",
+          "description": "A pinned model.",
+          "type": "string"
+        }
+      ]
+    },
+    "FetchedContent": {
+      "description": "One lock entry whose content was fetched, placed and checked against its pin.",
+      "properties": {
+        "address": {
+          "description": "The lock address.",
+          "type": "string"
+        },
+        "commit": {
+          "description": "The git commit the content was read at. None for an OCI artifact.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "digest": {
+          "description": "The lock's digest, which the placed bytes have.",
+          "type": "string"
+        },
+        "entry_type": {
+          "$ref": "#/$defs/EntryType",
+          "description": "The entry's type."
+        },
+        "path": {
+          "description": "Where the content was placed: a file for a document, else a folder or a file.",
+          "type": "string"
+        },
+        "source_subpath": {
+          "description": "The recorded path below the source address.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_url": {
+          "description": "The recorded source address, with any password left out.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "address",
+        "entry_type",
+        "source_url",
+        "digest",
+        "path"
+      ],
+      "type": "object"
+    },
+    "LockRecord": {
+      "description": "The lock file the loader checked.",
+      "properties": {
+        "entries": {
+          "description": "How many entries the lock has.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generator": {
+          "description": "The tool that wrote the lock, when the lock names it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "The lock file.",
+          "type": "string"
+        },
+        "sha256": {
+          "description": "The sha256 of the lock file's bytes, as lowercase hex.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "entries"
+      ],
+      "type": "object"
+    },
+    "NotFetchedContent": {
+      "description": "One lock entry whose content this fetch did not place.",
+      "properties": {
+        "address": {
+          "description": "The lock address.",
+          "type": "string"
+        },
+        "entry_type": {
+          "$ref": "#/$defs/EntryType",
+          "description": "The entry's type."
+        },
+        "reason": {
+          "description": "Why the content was not placed.",
+          "type": "string"
+        },
+        "source_type": {
+          "$ref": "#/$defs/SourceType",
+          "description": "Where the lock says the content comes from."
+        },
+        "source_url": {
+          "description": "The recorded source address, with any password left out.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "address",
+        "entry_type",
+        "source_type",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "SourceType": {
+      "description": "Where a lock entry says its content comes from.",
+      "oneOf": [
+        {
+          "const": "local",
+          "description": "A path inside the package.",
+          "type": "string"
+        },
+        {
+          "const": "git",
+          "description": "A git repository.",
+          "type": "string"
+        },
+        {
+          "const": "oci",
+          "description": "An OCI registry.",
+          "type": "string"
+        },
+        {
+          "const": "registry",
+          "description": "Another registry.",
+          "type": "string"
+        },
+        {
+          "const": "pointer",
+          "description": "Something already running, or a model: nothing is carried.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What one fetch placed and what it left.",
+  "properties": {
+    "fetched": {
+      "description": "Every lock entry whose content this fetch placed.",
+      "items": {
+        "$ref": "#/$defs/FetchedContent"
+      },
+      "type": "array"
+    },
+    "lock": {
+      "$ref": "#/$defs/LockRecord",
+      "description": "The lock file of that folder."
+    },
+    "not_fetched": {
+      "description": "Every lock entry whose content is still not in the folder, with the reason.",
+      "items": {
+        "$ref": "#/$defs/NotFetchedContent"
+      },
+      "type": "array"
+    },
+    "package_dir": {
+      "description": "The folder to load, absolute: `out_dir` when something was placed, else\nthe package folder as it was given.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "package_dir",
+    "lock",
+    "fetched",
+    "not_fetched"
+  ],
+  "title": "AgentPackageFetchReport",
+  "type": "object"
+}

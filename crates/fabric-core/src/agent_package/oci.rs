@@ -13,12 +13,12 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use super::digest::{
     MAX_FOLDER_BYTES, MAX_FOLDER_DEPTH, MAX_FOLDER_FILES, UNLISTED_FILE_NAME, bytes_digest,
-    digest_text,
+    digest_text, file_digest,
 };
 use super::error::{PackageError, PackageErrorCode, PackageResult};
 use super::json::{MAX_DOCUMENT_BYTES, read_regular_file};
@@ -58,6 +58,8 @@ fn blob_path(layout: &Path, digest: &str) -> Option<PathBuf> {
 #[derive(Debug)]
 pub(crate) struct Artifact {
     layout: PathBuf,
+    /// The manifest, then the config when the layout holds it, then the layer.
+    blobs: Vec<String>,
     layer_digest: String,
     layer_size: u64,
 }
@@ -150,8 +152,17 @@ pub(crate) fn find_artifact(
             format!("the layer is larger than {MAX_LAYER_BYTES} bytes"),
         ));
     }
+    let mut blobs = vec![digest.to_string()];
+    let config = manifest.pointer("/config/digest").and_then(Value::as_str);
+    if let Some(config) = config.filter(|config| {
+        blob_path(layout, config).is_some_and(|path| fs::symlink_metadata(path).is_ok())
+    }) {
+        blobs.push(config.to_string());
+    }
+    blobs.push(layer_digest.to_string());
     Ok(Some(Artifact {
         layout: layout.to_path_buf(),
+        blobs,
         layer_digest: layer_digest.to_string(),
         layer_size,
     }))
@@ -423,13 +434,90 @@ impl Artifact {
         })?;
         Ok(files)
     }
+
+    /// Write the files of the layer below `folder`, which holds nothing yet.
+    pub(crate) fn unpack(&self, folder: &Path, at: &str) -> PackageResult<()> {
+        self.files(at, |path, executable, content| {
+            let unwritten =
+                |error: io::Error| unread(at, format!("`{path}` cannot be written: {error}"));
+            let target = folder.join(path);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(unwritten)?;
+            }
+            // A file is never written over, so no path of the layer lands on another.
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&target)
+                .map_err(unwritten)?;
+            io::copy(content, &mut file).map_err(unwritten)?;
+            #[cfg(unix)]
+            if executable {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+                    .map_err(unwritten)?;
+            }
+            #[cfg(not(unix))]
+            let _ = executable;
+            Ok(())
+        })
+    }
+
+    /// Copy the blobs of the artifact into the store of a package.
+    ///
+    /// Each blob is copied only when its bytes have its digest. The manifest
+    /// goes last: a load looks for the manifest first, so a store never names
+    /// an artifact it does not hold whole.
+    pub(crate) fn keep(&self, store: &Path, at: &str) -> PackageResult<()> {
+        for digest in self.blobs.iter().rev() {
+            let (Some(from), Some(to)) =
+                (blob_path(&self.layout, digest), blob_path(store, digest))
+            else {
+                continue;
+            };
+            let unkept =
+                |error: io::Error| unread(at, format!("the blob {digest} cannot be kept: {error}"));
+            if file_digest(&from, at)? != *digest {
+                return Err(PackageError::new(
+                    PackageErrorCode::DigestMismatch,
+                    at,
+                    format!("the blob kept as {digest} in the layout folder has other bytes"),
+                ));
+            }
+            if let Some(parent) = to.parent() {
+                fs::create_dir_all(parent).map_err(unkept)?;
+            }
+            fs::copy(&from, &to).map_err(unkept)?;
+        }
+        Ok(())
+    }
+}
+
+/// Write what makes the store of a package a folder in the OCI image layout
+/// form: the marker file, and an index of the manifests the store holds.
+pub(crate) fn write_layout(store: &Path, manifests: &BTreeSet<String>) -> io::Result<()> {
+    let descriptors: Vec<Value> = manifests
+        .iter()
+        .filter_map(|digest| {
+            let size = fs::metadata(blob_path(store, digest)?).ok()?.len();
+            Some(json!({"mediaType": MANIFEST_TYPE, "digest": digest, "size": size}))
+        })
+        .collect();
+    if descriptors.is_empty() {
+        return Ok(());
+    }
+    fs::write(
+        store.join("oci-layout"),
+        "{\"imageLayoutVersion\":\"1.0.0\"}\n",
+    )?;
+    let index = json!({"schemaVersion": 2, "mediaType": INDEX_TYPE, "manifests": descriptors});
+    fs::write(store.join("index.json"), format!("{index}\n"))
 }
 
 /// Writes archives and layout folders for tests, byte by byte.
 #[cfg(test)]
 pub(crate) mod testing {
     use super::*;
-    use serde_json::json;
 
     /// One header block of a tar archive in the POSIX form.
     pub(crate) fn header(path: &str, size: usize, mode: u32, kind: u8) -> [u8; BLOCK] {
@@ -502,7 +590,6 @@ mod tests {
     use super::super::reader::testing::Package;
     use super::testing::*;
     use super::*;
-    use serde_json::json;
 
     const AT: &str = "$/plugins/remotion";
 

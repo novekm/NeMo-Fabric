@@ -207,6 +207,8 @@ async with await Fabric().start_agent_package(
 
 The loader fetches nothing: the package must already be resolved and locked. Refer to [Agent Packages](agent-packages.mdx) for the field mapping, the report, the error codes, and the two settings that decide whether an unmet requirement stops the load.
 
+When the lock pins content from git or an OCI registry that is not in the folder, call `fetch_agent_package(package_dir, out_dir)` first and load the `package_dir` of the `AgentPackageFetchReport` it returns. For a package that is itself a folder in a git repository, call `fetch_agent_package_from_git(source, ref, out_dir)`. Refer to [Fetch What a Lock Pins](agent-packages.mdx#fetch-what-a-lock-pins).
+
 ## SDK Subsections
 
 <a id="execution-model"></a>

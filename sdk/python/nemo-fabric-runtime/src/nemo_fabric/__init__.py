@@ -6,7 +6,10 @@
 from nemo_fabric.client import Fabric
 from nemo_fabric.agent_package import AgentPackageDeclaredItem
 from nemo_fabric.agent_package import AgentPackageDigestCheck
+from nemo_fabric.agent_package import AgentPackageFetchReport
 from nemo_fabric.agent_package import AgentPackageReport
+from nemo_fabric.agent_package import fetch_agent_package
+from nemo_fabric.agent_package import fetch_agent_package_from_git
 from nemo_fabric.agent_package import load_agent_package
 from nemo_fabric.check import CheckReport, CheckRequest
 from nemo_fabric.capabilities import AdapterCapabilityProfile
@@ -109,6 +112,7 @@ __all__ = [
     "AdapterInfo",
     "AgentPackageDeclaredItem",
     "AgentPackageDigestCheck",
+    "AgentPackageFetchReport",
     "AgentPackageReport",
     "ArtifactManifest",
     "ArtifactRef",
@@ -194,6 +198,8 @@ __all__ = [
     "ToolsConfig",
     "ToolDefinitionConfig",
     "WorkflowConfig",
+    "fetch_agent_package",
+    "fetch_agent_package_from_git",
     "inspect_adapter",
     "load_agent_package",
 ]

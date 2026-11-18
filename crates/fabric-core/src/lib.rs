@@ -28,7 +28,8 @@ pub use agent_execution::{
     AgentRunStatus, AgentUsage,
 };
 pub use agent_package::{
-    AgentPackageOptions, AgentPackageReport, load_agent_package,
+    AgentPackageFetchOptions, AgentPackageFetchReport, AgentPackageOptions, AgentPackageReport,
+    fetch_agent_package, fetch_agent_package_from_git, load_agent_package,
     load_agent_package_with_adapter_directories,
 };
 pub use check::{
