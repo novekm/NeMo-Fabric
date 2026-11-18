@@ -78,6 +78,10 @@ pub use runtime::{
     prepare_service, release_environment, release_service, run_plan, runtime_resource_snapshot,
     start_runtime, start_runtime_in, start_runtime_with_service, stop_runtime,
 };
+pub use runtime::{
+    CalledRuntime, STOP_REQUESTED_EVENT, StopRecord, StopRequest, StopRole, StoppedRuntime,
+    stop_records, stop_runtime_for,
+};
 pub use schema::{
     SchemaName, generate_all_schemas, generate_schema, generate_schema_json, write_schema_snapshots,
 };
