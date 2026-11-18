@@ -1,0 +1,68 @@
+{
+  "mode": "graph",
+  "inventory": {
+    "root": {
+      "package": "root",
+      "path": "agent.json",
+      "type": "agent"
+    },
+    "packages": {
+      "root": {
+        "origin": {
+          "type": "local"
+        },
+        "files": {
+          "agent.json": {
+            "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+            "type": "agent",
+            "name": "_reviewer",
+            "description": "Review a rendered video",
+            "instructions": "Report every item that fails.",
+            "hooks": {
+              "tool-guard": {
+                "source": "./hooks/tool-guard"
+              }
+            }
+          },
+          "hooks/tool-guard/check-tool-call": "#!/bin/sh\nexit 0\n"
+        },
+        "components": {
+          "hooks/tool-guard": {
+            "type": "hook",
+            "dependencies": []
+          }
+        }
+      }
+    }
+  },
+  "lock": {
+    "$schema": "https://oadl.example/schemas/0.4.0/lock.schema.json",
+    "type": "lock",
+    "entries": [
+      {
+        "address": "$",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:b68333f11bda8496d644b2ee5923e81207c6df161a8dfac9ba4b32ca525f45c5",
+        "dependencies": [
+          "$/hooks/tool-guard"
+        ]
+      },
+      {
+        "address": "$/hooks/tool-guard",
+        "type": "hook",
+        "source": {
+          "type": "local",
+          "url": "./hooks/tool-guard"
+        },
+        "version": "local",
+        "digest": "sha256:fba579dda20202778cdc43228c3c61d1e2d9f7c3df1a1d6010e0d4b4c649984c",
+        "dependencies": []
+      }
+    ]
+  }
+}

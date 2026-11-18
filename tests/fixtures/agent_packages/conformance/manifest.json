@@ -1,0 +1,303 @@
+{
+  "format": "oadl-0.4-offline-fixtures/1",
+  "source_manifest_sha256": "51567639ac98a8865093f9a2b7f76267bc562bf08815280ce004974d9fa104e3",
+  "source_cases": 705,
+  "cases": [
+    {
+      "path": "cases/agent-three-required-fields.json",
+      "error": null
+    },
+    {
+      "path": "cases/lock-three-entries.json",
+      "error": null
+    },
+    {
+      "path": "cases/document-is-a-list.json",
+      "error": "document.object"
+    },
+    {
+      "path": "cases/type-does-not-match-schema.json",
+      "error": "document.version"
+    },
+    {
+      "path": "cases/type-missing.json",
+      "error": "document.type"
+    },
+    {
+      "path": "cases/agent-without-name.json",
+      "error": "schema:/ required:"
+    },
+    {
+      "path": "cases/lock-unknown-field.json",
+      "error": "schema:/ additionalProperties:"
+    },
+    {
+      "path": "cases/whole-agent-runs-without-a-definition.json",
+      "error": null
+    },
+    {
+      "path": "cases/variable-default-outside-its-allowed-values.json",
+      "error": "document.variable_default:model"
+    },
+    {
+      "path": "cases/reference-to-a-variable-that-is-not-declared.json",
+      "error": "document.variable_undeclared:job"
+    },
+    {
+      "path": "cases/reference-of-another-type-than-its-place.json",
+      "error": "document.variable_type:job"
+    },
+    {
+      "path": "cases/distinct-names-read-as-text.json",
+      "error": null
+    },
+    {
+      "path": "cases/duplicate-skill-name.json",
+      "error": "json.duplicate_key"
+    },
+    {
+      "path": "cases/graph-valid.json",
+      "error": null
+    },
+    {
+      "path": "cases/entrypoint-bytes-changed.json",
+      "error": "lock.digest_binding"
+    },
+    {
+      "path": "cases/equal-content-different-origin.json",
+      "error": "lock.source_binding"
+    },
+    {
+      "path": "cases/lock-duplicate-address.json",
+      "error": "lock.address_unique"
+    },
+    {
+      "path": "cases/lock-dangling-edge.json",
+      "error": "lock.dangling"
+    },
+    {
+      "path": "cases/lock-cycle.json",
+      "error": "lock.cycle"
+    },
+    {
+      "path": "cases/lock-extra-unreachable.json",
+      "error": "lock.unreachable"
+    },
+    {
+      "path": "cases/lock-missing-transitive-model.json",
+      "error": "lock.exact_closure"
+    },
+    {
+      "path": "cases/model-interface-revision-mismatch.json",
+      "error": "lock.interface_version"
+    },
+    {
+      "path": "cases/floating-lock-version.json",
+      "error": "lock.exact_version"
+    },
+    {
+      "path": "cases/running-connector-without-tools-hash.json",
+      "error": "lock.connector_interface"
+    },
+    {
+      "path": "cases/running-agent-without-card-digest.json",
+      "error": "lock.agent_interface"
+    },
+    {
+      "path": "cases/pointer-entry-typed-as-skill.json",
+      "error": "lock.pointer_type"
+    },
+    {
+      "path": "cases/local-package-escape.json",
+      "error": "reference.package_boundary"
+    },
+    {
+      "path": "cases/missing-selected-skill.json",
+      "error": "reference.missing"
+    },
+    {
+      "path": "cases/carried-connector-without-mcp-json.json",
+      "error": "reference.connector_entrypoint"
+    },
+    {
+      "path": "cases/optional-part-unresolved-left-out-of-the-lock.json",
+      "error": null
+    },
+    {
+      "path": "cases/required-part-unresolved-stops-the-resolution.json",
+      "error": "reference.unresolved"
+    },
+    {
+      "path": "cases/local-source-version-recorded.json",
+      "error": "lock.constraint_binding"
+    },
+    {
+      "path": "cases/hook-folder-without-hooks-json.json",
+      "error": "reference.hook_entrypoint"
+    },
+    {
+      "path": "cases/hook-lock-entry-typed-as-skill.json",
+      "error": "lock.type_binding"
+    },
+    {
+      "path": "cases/definition-reuses-a-name-with-another-source-in-graph.json",
+      "error": "definition.name_in_use:skills.review"
+    },
+    {
+      "path": "cases/definition-points-at-a-definition.json",
+      "error": "reference.type"
+    },
+    {
+      "path": "cases/definition-value-for-an-undeclared-variable-in-graph.json",
+      "error": "definition.variable_undeclared:tone"
+    },
+    {
+      "path": "cases/definition-value-of-another-type-in-graph.json",
+      "error": "definition.variable_type:max_turns"
+    },
+    {
+      "path": "cases/definition-value-outside-the-allowed-values-in-graph.json",
+      "error": "definition.variable_enum:max_turns"
+    },
+    {
+      "path": "cases/agents-entry-folder-without-agent-json.json",
+      "error": "reference.missing"
+    },
+    {
+      "path": "cases/selected-reference-cycle.json",
+      "error": "reference.cycle"
+    },
+    {
+      "path": "cases/called-agent-without-description-in-graph.json",
+      "error": "reference.agent_description"
+    },
+    {
+      "path": "cases/agents-entry-value-for-an-undeclared-variable.json",
+      "error": "reference.variable_undeclared:tone"
+    },
+    {
+      "path": "cases/agents-entry-value-of-another-type.json",
+      "error": "reference.variable_type:max_turns"
+    },
+    {
+      "path": "cases/agents-entry-value-outside-the-allowed-values.json",
+      "error": "reference.variable_enum:max_turns"
+    },
+    {
+      "path": "cases/tool-names-a-connector-the-agent-does-not-have.json",
+      "error": "document.tool_connector"
+    },
+    {
+      "path": "cases/tool-names-a-missing-connector-in-graph.json",
+      "error": "document.tool_connector"
+    },
+    {
+      "path": "cases/variable-default-used.json",
+      "error": null
+    },
+    {
+      "path": "cases/variable-with-no-value-and-no-default.json",
+      "error": "variable.missing:job"
+    },
+    {
+      "path": "cases/value-for-a-name-the-agent-does-not-declare.json",
+      "error": "variable.undeclared:tone"
+    },
+    {
+      "path": "cases/value-of-another-type.json",
+      "error": "variable.type:max_turns"
+    },
+    {
+      "path": "cases/value-outside-the-allowed-values.json",
+      "error": "variable.enum:model"
+    },
+    {
+      "path": "cases/value-must-fit-the-field-it-lands-in.json",
+      "error": "variable.value"
+    },
+    {
+      "path": "cases/definition-gives-the-values.json",
+      "error": null
+    },
+    {
+      "path": "cases/definition-value-for-an-undeclared-variable.json",
+      "error": "variable.undeclared:tone"
+    },
+    {
+      "path": "cases/definition-leaves-a-variable-with-no-default.json",
+      "error": "variable.missing:job"
+    },
+    {
+      "path": "cases/definition-points-at-a-document-that-is-not-an-agent.json",
+      "error": "definition.agent_type"
+    },
+    {
+      "path": "cases/definition-value-outside-the-allowed-values.json",
+      "error": "variable.enum:model"
+    },
+    {
+      "path": "cases/definition-need-not-met-receiver-with-no-choice-stops.json",
+      "error": "run.not_started"
+    },
+    {
+      "path": "cases/definition-reuses-a-name-with-another-source.json",
+      "error": "definition.name_in_use:skills.brand-kit"
+    },
+    {
+      "path": "cases/definition-tool-names-a-connector-neither-has.json",
+      "error": "definition.tool_connector:mail.send"
+    },
+    {
+      "path": "cases/definition-that-names-a-model-is-refused.json",
+      "error": "schema:/ additionalProperties:"
+    },
+    {
+      "path": "cases/unchecked-need-never-given-as-met.json",
+      "error": "run.not_started"
+    },
+    {
+      "path": "cases/called-entry-is-a-definition.json",
+      "error": "called.type:reviewer"
+    },
+    {
+      "path": "cases/called-agent-without-description.json",
+      "error": "called.description:helper"
+    },
+    {
+      "path": "cases/called-agent-with-description.json",
+      "error": null
+    },
+    {
+      "path": "cases/called-document-fails-its-schema.json",
+      "error": "schema:/ additionalProperties:"
+    },
+    {
+      "path": "cases/called-agent-entry-value-for-an-undeclared-variable.json",
+      "error": "variable.undeclared:tone"
+    },
+    {
+      "path": "cases/called-agents-unsupported-is-named.json",
+      "error": "support.required_feature:agents"
+    },
+    {
+      "path": "cases/required-part-unsupported-is-named.json",
+      "error": "support.required_feature:plugins"
+    },
+    {
+      "path": "cases/optional-part-unsupported-never-stops.json",
+      "error": null
+    },
+    {
+      "path": "cases/one-required-entry-among-optional-ones-is-named.json",
+      "error": "support.required_feature:plugins"
+    },
+    {
+      "path": "cases/hook-that-cannot-be-run-is-named.json",
+      "error": "support.required_feature:hooks"
+    },
+    {
+      "path": "cases/linked-policy-unreadable-is-named.json",
+      "error": "support.policy_unreadable:licensed-assets"
+    }
+  ]
+}

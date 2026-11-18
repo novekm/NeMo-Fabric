@@ -1,0 +1,50 @@
+{
+  "mode": "graph",
+  "inventory": {
+    "root": {
+      "package": "root",
+      "path": "agent.json",
+      "type": "agent"
+    },
+    "packages": {
+      "root": {
+        "origin": {
+          "type": "local"
+        },
+        "files": {
+          "agent.json": {
+            "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+            "type": "agent",
+            "name": "_reviewer",
+            "description": "Review a rendered video",
+            "instructions": "Report every item that fails.",
+            "tools": [
+              {
+                "connector": "mail",
+                "tool": "send"
+              }
+            ]
+          }
+        },
+        "components": {}
+      }
+    }
+  },
+  "lock": {
+    "$schema": "https://oadl.example/schemas/0.4.0/lock.schema.json",
+    "type": "lock",
+    "entries": [
+      {
+        "address": "$",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:25778a8532f2ff5b7d5fc1cb566b00e7de69d266177bc820dde62aefff00711d",
+        "dependencies": []
+      }
+    ]
+  }
+}

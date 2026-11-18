@@ -1,0 +1,61 @@
+{
+  "mode": "definition",
+  "definition": {
+    "$schema": "https://oadl.example/schemas/0.4.0/agent-definition.schema.json",
+    "type": "agent-definition",
+    "name": "weather-large",
+    "agent": {
+      "source": "./agent.json"
+    },
+    "variables": {
+      "model": "ollama::mistral-small3.2:24b"
+    },
+    "runtime": {
+      "compute": {
+        "memory": "32gb",
+        "reason": "The model is served on the machine the agent runs on."
+      }
+    }
+  },
+  "agent": {
+    "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+    "type": "agent",
+    "name": "weather",
+    "description": "Answers questions about the weather.",
+    "model": {
+      "source": {
+        "var": "model"
+      },
+      "capabilities": [
+        "tool-use"
+      ]
+    },
+    "variables": {
+      "model": {
+        "type": "string",
+        "enum": [
+          "ollama::llama3.2:3b",
+          "ollama::mistral-small3.2:24b"
+        ],
+        "default": "ollama::llama3.2:3b",
+        "description": "The model the agent starts on."
+      }
+    }
+  },
+  "facts": {
+    "memory": "16gb",
+    "model": {
+      "capabilities": [
+        "tool-use"
+      ]
+    }
+  },
+  "expect": {
+    "run": {
+      "required_not_met": [
+        "definition.runtime.compute.memory"
+      ],
+      "starts": false
+    }
+  }
+}

@@ -1,0 +1,1146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+  "title": "OADL 0.4 agent",
+  "description": "An agent: the one document type that runs. It holds the agent's instructions, its parts by reference, its model, its limits, the variables it opens and what it needs to run. A person working alone writes the whole agent in this one file. Sub-agent and orchestrator are roles an agent plays in one load: an agent that lists agents acts as an orchestrator, and an agent listed by another is a sub-agent in that load. No field marks either.",
+  "type": "object",
+  "required": [
+    "$schema",
+    "type",
+    "name"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+      "description": "The URL of the schema this document conforms to. It gives the document type and the OADL version."
+    },
+    "type": {
+      "const": "agent",
+      "description": "Document type; always agent."
+    },
+    "name": {
+      "$ref": "#/$defs/name",
+      "description": "The agent's name, kept as written."
+    },
+    "description": {
+      "$ref": "#/$defs/description",
+      "description": "What the agent is for. An agent that another agent lists under agents must have one: the model reads it to decide when to call the agent."
+    },
+    "instructions": {
+      "$ref": "#/$defs/instructions",
+      "description": "The agent's instructions: text the author writes for the model. It may be a variable reference."
+    },
+    "model": {
+      "$ref": "#/$defs/model",
+      "description": "The default model, its settings, and what the agent needs from any model."
+    },
+    "limits": {
+      "$ref": "#/$defs/limits",
+      "description": "Limits on the agent's run and on the agents it calls."
+    },
+    "variables": {
+      "$ref": "#/$defs/variables",
+      "description": "The variables the agent declares, keyed by name. Whoever starts the agent, an entry that points at it, or a definition gives each one a value."
+    },
+    "skills": {
+      "$ref": "#/$defs/skills",
+      "description": "Skills the agent has, keyed by name."
+    },
+    "plugins": {
+      "$ref": "#/$defs/plugins",
+      "description": "Plugins the agent has, keyed by name."
+    },
+    "connectors": {
+      "$ref": "#/$defs/connectors",
+      "description": "Connectors the agent has, keyed by name. A connector is an MCP server."
+    },
+    "hooks": {
+      "$ref": "#/$defs/hooks",
+      "description": "Hooks the agent has, keyed by name."
+    },
+    "tools": {
+      "$ref": "#/$defs/tools",
+      "description": "Tools the agent needs, by name: a built-in tool, or a tool of one of its connectors."
+    },
+    "custom_tools": {
+      "$ref": "#/$defs/custom_tools",
+      "description": "Tools the host application implements, keyed by name."
+    },
+    "packages": {
+      "$ref": "#/$defs/packages",
+      "description": "Software fetched from its own registry and pinned, keyed by name."
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime",
+      "description": "What the agent needs where it runs: compute, software, network reach and, rarely, a harness."
+    },
+    "agents": {
+      "$ref": "#/$defs/agents",
+      "description": "Other agents this agent may call, keyed by name."
+    },
+    "policies": {
+      "$ref": "#/$defs/policies",
+      "description": "Policy packages that travel with the agent, keyed by name."
+    },
+    "credentials": {
+      "$ref": "#/$defs/credentials",
+      "description": "Logical credential requirements, keyed by id. Never a value."
+    },
+    "outputs": {
+      "$ref": "#/$defs/outputs",
+      "description": "Named typed values the agent publishes."
+    },
+    "extensions": {
+      "$ref": "#/$defs/extensions",
+      "description": "Data for one tool, keyed by that tool's name. Every other tool skips it."
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9_][a-z0-9_-]*$",
+      "not": {
+        "type": "string",
+        "pattern": "[^a-z0-9_-]"
+      },
+      "description": "An authored name: lowercase letters, digits, _ and -, not starting with -. Underscores and a leading underscore are significant. Nothing is normalized."
+    },
+    "description": {
+      "type": "string",
+      "description": "What the agent is for, in plain words. Another agent's model reads it to decide when to call this agent.",
+      "minLength": 1
+    },
+    "instructions": {
+      "if": {
+        "type": "object"
+      },
+      "then": {
+        "$ref": "#/$defs/var"
+      },
+      "else": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Text the author writes for the model: its job, tone and rules. It is not the system prompt: the software that runs the agent may have a prompt of its own, and that software decides where this text lands. Instruction text is guidance: anything that must hold belongs in limits and policy. The whole value may be a variable reference."
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "not": {
+        "type": "string",
+        "pattern": "\\s"
+      },
+      "description": "The name of a variable or an output: letters, digits and _, not starting with a digit."
+    },
+    "var": {
+      "type": "object",
+      "required": [
+        "var"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "var": {
+          "$ref": "#/$defs/identifier",
+          "description": "The name of a variable this document declares under variables."
+        }
+      },
+      "description": "A variable reference, written in place of a whole value: {\"var\": \"<name>\"}. A receiver puts the variable's value there before the agent starts. It may stand for instructions, model.source, a member of model.parameters, a member of limits, runtime.harness.name, and a value inside the variables object of an entry. It may not stand for a source, a version, a name, a type or a key."
+    },
+    "variable": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false,
+      "description": "One variable: its type, and optionally its allowed values, a default and a description.",
+      "properties": {
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "boolean"
+          ],
+          "description": "The type of the value: string, number or boolean."
+        },
+        "enum": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "description": "The allowed values, as a list. Each one matches the type. A value outside the list is refused, and the receiver names the variable. Left out, any value of the type is allowed."
+        },
+        "default": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ],
+          "description": "The value used when nobody gives one. It matches the type, and it is one of the allowed values when the variable lists them. A variable with no default must be given a value, or the agent does not start."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the variable is for, shown to whoever sets it."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "const": "string"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "default": {
+                "type": "string"
+              },
+              "enum": {
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "const": "number"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "default": {
+                "type": "number"
+              },
+              "enum": {
+                "items": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "const": "boolean"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "default": {
+                "type": "boolean"
+              },
+              "enum": {
+                "items": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "variables": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/variable"
+      },
+      "description": "The variables the agent declares, keyed by name. A variable is a blank the agent opens: a value is put where {\"var\": \"<name>\"} is written. A value comes from, first match wins: whoever starts the agent, the variables object on an entry that points at this agent (an agents entry or a definition), then the default. A value for a name the agent does not declare is refused.",
+      "minProperties": 1
+    },
+    "values": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "if": {
+          "type": "object"
+        },
+        "then": {
+          "$ref": "#/$defs/var"
+        },
+        "else": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "description": "Values handed to the part, written {\"<name>\": value}. A value is a string, a number or a boolean, or a reference to one of this document's own variables. On an entry under agents they are values for the variables the called agent declares. On an entry under skills the receiver gives them to the model with the skill.",
+      "minProperties": 1
+    },
+    "model": {
+      "type": "object",
+      "description": "The default model and what the agent needs from any model. source is the model the agent starts on when it is available: whoever starts the agent may choose another. capabilities and min_context_tokens are what the agent needs from whatever model runs it: every model used must meet them, and the one used is reported. A receiver never refuses an agent only because it names no model. Endpoints and keys are bound by the platform, never written here.",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "source": {
+          "if": {
+            "type": "object"
+          },
+          "then": {
+            "$ref": "#/$defs/var"
+          },
+          "else": {
+            "$ref": "#/$defs/model_name"
+          },
+          "description": "The default model: the one the agent starts on when it is available. Written type::name, where the text before :: names the catalog the model comes from, as in ollama::llama3.2:3b, or as a registry address. Never an endpoint or a key. It may be a variable reference."
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The exact revision of the model named by source, as its catalog names revisions. Optional. A lock pins the model only when a revision is written."
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "description": "Default settings, used where the model that runs supports them. A setting that was not used is reported, never dropped silently. Each member may be a variable reference.",
+          "properties": {
+            "effort": {
+              "if": {
+                "type": "object"
+              },
+              "then": {
+                "$ref": "#/$defs/var"
+              },
+              "else": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "description": "How much reasoning the model spends: low, medium or high."
+            },
+            "temperature": {
+              "if": {
+                "type": "object"
+              },
+              "then": {
+                "$ref": "#/$defs/var"
+              },
+              "else": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2
+              },
+              "description": "Sampling temperature, 0 to 2."
+            },
+            "max_output_tokens": {
+              "if": {
+                "type": "object"
+              },
+              "then": {
+                "$ref": "#/$defs/var"
+              },
+              "else": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "description": "The most tokens one response may contain."
+            }
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/term"
+          },
+          "description": "What the agent needs any model to be able to do, by name, such as tool-use and vision. The list of names is open. A receiver that does not recognize a name reports the need as one it could not check."
+        },
+        "min_context_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The smallest context window the agent needs from any model, in tokens."
+        }
+      },
+      "dependentRequired": {
+        "revision": [
+          "source"
+        ]
+      }
+    },
+    "limits": {
+      "type": "object",
+      "description": "Limits on an agent's run and on the agents it calls. max_turns applies to each agent's own run. max_total_tokens and timeout_seconds cover an agent's run together with the runs of every agent it calls: set on the agent a session starts from, they cover the whole call tree. max_parallel and max_depth bound the tree itself. A called agent runs under its caller's limits: for each limit the smaller number applies, and a higher number is lowered and reported, not refused. A declaration is not evidence of enforcement: a receiver that cannot enforce a limit says so before the run starts. Each member may be a variable reference.",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "max_turns": {
+          "if": {
+            "type": "object"
+          },
+          "then": {
+            "$ref": "#/$defs/var"
+          },
+          "else": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Most model turns one agent's own run may take. The turns of an agent it calls are counted in that agent's own run, not here."
+        },
+        "timeout_seconds": {
+          "if": {
+            "type": "object"
+          },
+          "then": {
+            "$ref": "#/$defs/var"
+          },
+          "else": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "description": "Longest an agent's run may take, in seconds, together with the runs of every agent it calls. It is one clock that starts when the agent's run starts; time is not added up across agents."
+        },
+        "max_parallel": {
+          "if": {
+            "type": "object"
+          },
+          "then": {
+            "$ref": "#/$defs/var"
+          },
+          "else": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Most called agents or tool calls the agent may run at the same time."
+        },
+        "max_depth": {
+          "if": {
+            "type": "object"
+          },
+          "then": {
+            "$ref": "#/$defs/var"
+          },
+          "else": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "How many levels of called agents there may be below this agent; 0 means it may not call another agent."
+        },
+        "max_total_tokens": {
+          "if": {
+            "type": "object"
+          },
+          "then": {
+            "$ref": "#/$defs/var"
+          },
+          "else": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Token budget: the most tokens an agent's run may use together with the runs of every agent it calls, input and output together, over all their model calls."
+        }
+      }
+    },
+    "skill": {
+      "type": "object",
+      "required": [
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/source",
+          "description": "Where the skill comes from: ./path, or type::address such as git:: or oci::."
+        },
+        "version": {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/version",
+          "description": "The version to select. Required unless the source is local."
+        },
+        "optional": {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/optional",
+          "description": "true: the agent still starts when this skill cannot be loaded, and the receiver reports it."
+        },
+        "variables": {
+          "$ref": "#/$defs/values",
+          "description": "Values for this use of the skill, by name. A receiver gives them to the model with the skill."
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/version_rule"
+        },
+        {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/fetched"
+        }
+      ],
+      "description": "One skill: a reference, and optional values for this use of the skill. A skill is an Agent Skills folder, used as it is."
+    },
+    "skills": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/skill"
+      },
+      "description": "Skills the agent has, keyed by name. A skill is an Agent Skills folder, used as it is. The key is the skill's name in this document, and the lock points at it by that name. The same skill used twice with different values has two names.",
+      "minProperties": 1
+    },
+    "plugins": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "allOf": [
+          {
+            "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json"
+          },
+          {
+            "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/fetched"
+          }
+        ]
+      },
+      "description": "Plugins the agent has, keyed by name. A plugin is an Agent Plugins folder, used as it is, with everything it bundles. Each entry is a reference.",
+      "minProperties": 1
+    },
+    "connectors": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "allOf": [
+          {
+            "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json"
+          },
+          {
+            "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/not_an_agent"
+          }
+        ]
+      },
+      "description": "Connectors the agent has, keyed by name. A connector is an MCP server. Where it lives is said by its source. A connector that is carried in the package or fetched (./path, git:: or oci::) is a folder with a file mcp.json that says how to start it, and it is pinned by content. A connector that is already running is written mcp::<address> with a version: the lock pins the version it declares and a hash of its tools, and the platform binds the endpoint and the credentials. Each entry is a reference.",
+      "minProperties": 1
+    },
+    "hooks": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "allOf": [
+          {
+            "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json"
+          },
+          {
+            "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/fetched"
+          }
+        ]
+      },
+      "description": "Hooks the agent has, keyed by name. Each entry is a reference to a hook package: a folder with a hooks.json at its root and the files its handlers run. hooks.json names its own format in its $schema, and a receiver reads the format from there: OADL defines no hook event and no handler format. A receiver that cannot run a hook says so before the run starts.",
+      "minProperties": 1
+    },
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Tools the agent needs, by name: a tool the software running the agent provides itself, or a tool of one of the agent's connectors. A declaration is not permission: policy decides what the agent may call. Tools the host application implements go in custom_tools.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A tool of one of the agent's connectors",
+            "required": [
+              "connector",
+              "tool"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "connector": {
+                "$ref": "#/$defs/name",
+                "description": "The key of an entry in connectors: in this document or, for a tool in a definition, in the agent it points at"
+              },
+              "tool": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The tool's name on that connector, e.g. render_video"
+              },
+              "description": {
+                "type": "string",
+                "description": "What the agent uses the tool for, shown to reviewers"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A tool that the software running the agent provides itself",
+            "required": [
+              "builtin"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "builtin": {
+                "$ref": "#/$defs/tool_name",
+                "description": "The built-in tool's name, e.g. read_file. Whatever runs the agent says which built-in tools it provides"
+              },
+              "description": {
+                "type": "string",
+                "description": "What the agent uses the tool for, shown to reviewers"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "custom_tools": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/tool_name"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "description": "A tool the host application implements",
+        "required": [
+          "description",
+          "input_schema"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What the tool does. The model reads it to decide when to call the tool.",
+            "minLength": 1
+          },
+          "input_schema": {
+            "type": "object",
+            "description": "A JSON Schema for the tool's input."
+          }
+        }
+      },
+      "description": "Tools the host application implements, keyed by the tool's name, e.g. request_approval. The document gives each one a description and an input schema, and the application that hosts the agent supplies the code.",
+      "minProperties": 1
+    },
+    "packages": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "allOf": [
+          {
+            "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json"
+          },
+          {
+            "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/fetched"
+          }
+        ]
+      },
+      "description": "Software fetched for the agent, keyed by name. A package is fetched from its own registry, such as pypi:: or npm::, and pinned by exact version and digest. Software that is expected to be on the machine already goes under runtime.software. Each entry is a reference.",
+      "minProperties": 1
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "What the agent needs where it runs. Every member may be left out, and left out means no need: most agents have no runtime block. A written number is a floor. Everything here is required unless it carries optional: true. A receiver checks each need against the run and gives it one of four statuses: met here, met remotely through a named connector, not met, could not be checked. runtime is what the agent needs. Sandbox policy is what the platform allows: there is no sandbox field, and whether and how the agent is sandboxed is decided by the platform's own policy. The model is not placement: it has its own block.",
+      "properties": {
+        "compute": {
+          "$ref": "#/$defs/compute",
+          "description": "Hardware the work the agent's tools do on the machine needs: cpus, memory, storage and gpu, with a reason."
+        },
+        "software": {
+          "$ref": "#/$defs/software",
+          "description": "Programs that must already be on the machine, keyed by name, each with a version floor and a reason."
+        },
+        "network": {
+          "enum": [
+            "none",
+            "internal",
+            "external"
+          ],
+          "description": "The least network reach the agent needs: none, internal (internal systems only) or external (public endpoints)."
+        },
+        "harness": {
+          "$ref": "#/$defs/harness",
+          "description": "A harness the agent names, for example the one it was evaluated on. Leave it out of an agent you share."
+        }
+      }
+    },
+    "compute": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Hardware the work the agent's tools do on the machine needs: data held in memory, files written, a tool that computes on a local GPU. Every number is a floor. What an agent was tested on is published beside it, not here.",
+      "properties": {
+        "cpus": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Least number of CPUs, virtual CPUs or cores."
+        },
+        "memory": {
+          "$ref": "#/$defs/size",
+          "description": "Least memory the run can use, e.g. 16gb."
+        },
+        "storage": {
+          "$ref": "#/$defs/size",
+          "description": "Least free storage the run can use, e.g. 100gb."
+        },
+        "gpu": {
+          "$ref": "#/$defs/gpu",
+          "description": "A GPU need: which interfaces the work is built against, how much memory and how many."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why the agent has the needs in this block. Shown when one of them is not met or could not be checked."
+        },
+        "optional": {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/optional",
+          "description": "true: the whole block is a preference. An unmet need in it never stops a start, and the receiver reports it."
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "cpus"
+          ]
+        },
+        {
+          "required": [
+            "memory"
+          ]
+        },
+        {
+          "required": [
+            "storage"
+          ]
+        },
+        {
+          "required": [
+            "gpu"
+          ]
+        }
+      ]
+    },
+    "gpu": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A GPU need. interface says which software interfaces the work is built against, each with its own floor. memory and count say how much. families is an allow-list of GPU architectures, for work that is built for each architecture. models is an exact pin. access says where the GPU may be. The members hold together: each of count GPUs meets all of them.",
+      "properties": {
+        "interface": {
+          "$ref": "#/$defs/gpu_interface",
+          "description": "The software interfaces the work is built against, keyed by name, such as cuda. Any one entry satisfies."
+        },
+        "memory": {
+          "$ref": "#/$defs/size",
+          "description": "Least memory on each GPU, e.g. 16gb. It is compared with what the device reports."
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Least number of GPUs; one when left out."
+        },
+        "families": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/term"
+          },
+          "description": "An allow-list of GPU architecture families, by name. Any one satisfies. It is for work that is built once for each architecture; work that only needs a floor states it under interface. The list of names is open."
+        },
+        "models": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "not": {
+              "type": "string",
+              "pattern": "[\\n\\r\\t]"
+            }
+          },
+          "description": "A pin to named GPU models. Any one satisfies. Most agents leave it out."
+        },
+        "access": {
+          "enum": [
+            "any",
+            "local",
+            "remote"
+          ],
+          "default": "any",
+          "description": "Where the GPU may be: any, local or remote. With any, the default, it is where the agent's commands run or it is reached over the network. With local it is where the agent's commands and its carried connectors run. With remote it is reached over the network, through a connector the platform binds."
+        },
+        "optional": {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/optional",
+          "description": "true: the GPU is a preference. The agent still starts without one, and the receiver reports it."
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "interface"
+          ]
+        },
+        {
+          "required": [
+            "memory"
+          ]
+        },
+        {
+          "required": [
+            "count"
+          ]
+        },
+        {
+          "required": [
+            "families"
+          ]
+        },
+        {
+          "required": [
+            "models"
+          ]
+        },
+        {
+          "required": [
+            "access"
+          ]
+        }
+      ]
+    },
+    "gpu_interface": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/term"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "One interface and its floor. An empty object means the interface with no floor.",
+        "properties": {
+          "version": {
+            "$ref": "#/$defs/constraint",
+            "description": "The least version of the interface, as a constraint, e.g. >= 12.0"
+          },
+          "compute_capability": {
+            "$ref": "#/$defs/constraint",
+            "description": "The least compute capability of the GPU, as a constraint, e.g. >= 7.0. It is a cuda floor"
+          }
+        }
+      },
+      "description": "The software interfaces the work is built against, as a map keyed by interface name. Well-known names are cuda, metal, rocm and vulkan; the list is open. Any one entry satisfies. Each entry may carry that interface's own floor. A version of an interface is stated here, not under software."
+    },
+    "size": {
+      "type": "string",
+      "pattern": "^[0-9]+(?:\\.[0-9]+)?(?:kb|mb|gb|tb)$",
+      "description": "An amount of memory or storage: a number above zero followed by kb, mb, gb or tb, e.g. 16gb. Units are powers of 1024.",
+      "not": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[0.]+[a-z]"
+          },
+          {
+            "type": "string",
+            "pattern": "\\s"
+          }
+        ]
+      }
+    },
+    "software": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "not": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "\\s"
+            },
+            {
+              "enum": [
+                "cuda",
+                "metal",
+                "rocm",
+                "vulkan"
+              ]
+            }
+          ]
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "$ref": "#/$defs/constraint",
+            "description": "The version the program must have, as a constraint, e.g. >= 6.0."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Why the agent needs the program, shown when the need is not met or could not be checked."
+          },
+          "optional": {
+            "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/optional",
+            "description": "true: the program is a preference. The agent still starts without it, and the receiver reports it."
+          }
+        }
+      },
+      "description": "Programs that must already be on the machine, keyed by the program's name, such as ffmpeg. Nothing here is installed: a placer picks an image that has them, or a harness checks the machine. Whatever the command of a carried connector needs is stated here too. A GPU interface is not a program: its version goes under compute.gpu.interface, and the four well-known interface names are refused as keys."
+    },
+    "harness": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "description": "The harness the agent names. Written without optional it is a requirement like any other: a receiver that is not that harness reports it, and whoever runs the agent decides whether that stops the start. With optional it is a preference that a placer follows when it can. The format defines no list of harness names: a name means what the platform that reads it says it means, and a name the receiver does not know gives the status could not be checked. Leave it out of an agent you share, so the agent stays portable.",
+      "properties": {
+        "name": {
+          "if": {
+            "type": "object"
+          },
+          "then": {
+            "$ref": "#/$defs/var"
+          },
+          "else": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$",
+            "not": {
+              "type": "string",
+              "pattern": "\\s"
+            }
+          },
+          "description": "The harness's name, e.g. claude-code. It may be a variable reference."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why the agent names this harness, e.g. that it was evaluated on it."
+        },
+        "optional": {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/optional",
+          "description": "true: the harness is a preference. Mark it unless the agent truly depends on that harness."
+        }
+      }
+    },
+    "term": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+      "not": {
+        "type": "string",
+        "pattern": "\\s"
+      },
+      "description": "A lowercase name from an open list: a model capability, a GPU interface or a GPU architecture family."
+    },
+    "constraint": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?:(?:>=|~>) ?)?[0-9]+(?:\\.[0-9]+)*(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+      "not": {
+        "type": "string",
+        "pattern": "[\\n\\r\\t]"
+      },
+      "description": "A version constraint. It has one of three forms. An exact version, such as 12.4, is met by that version and no other, compared as written: 12.4 is not 12.4.0. >= and a version, such as >= 12.0, is met by that version or any later one. ~> and a version, such as ~> 12.0, is met by that version or a later one in which only the last number written has moved: ~> 12.0 stays below 13.0, ~> 12.0.0 stays below 12.1.0, and ~> 12 stays below 13. A version is one or more numbers joined by dots; it may end with - and a pre-release part, and with + and a build part. One space may follow >= or ~>. Nothing else is a constraint: no other operator and no list of constraints. The version of a reference uses the same grammar, and may also be a full git commit."
+    },
+    "agent_entry": {
+      "type": "object",
+      "required": [
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/source",
+          "description": "Where the agent comes from: ./path, git:: or oci::, or a2a::<address> for an agent that is already running."
+        },
+        "version": {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/version",
+          "description": "The version to select. Required unless the source is local."
+        },
+        "optional": {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/optional",
+          "description": "true: the caller still starts when this agent cannot be loaded or reached, and the receiver reports it."
+        },
+        "variables": {
+          "$ref": "#/$defs/values",
+          "description": "Values for the variables the called agent declares, by name. A name it does not declare is refused."
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/version_rule"
+        },
+        {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/not_a_connector"
+        }
+      ],
+      "description": "One called agent: a reference, and optional values for the variables that agent declares."
+    },
+    "agents": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/agent_entry"
+      },
+      "description": "Other agents this agent may call, keyed by name. A receiver offers each one to the model as something it can call by name, with the called agent's description, so a called agent must have a description. A called agent runs with its own instructions and parts, under its caller: the caller's limits and policies apply to it and can only be tightened. A called agent that names no model takes the caller's model by default, and the model each run used is reported. An agent that is already running elsewhere is written a2a::<address> with a version: the lock pins the version its Agent Card declares and a digest of the card. Listing an agent starts nothing and grants nothing.",
+      "minProperties": 1
+    },
+    "policies": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "allOf": [
+          {
+            "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json"
+          },
+          {
+            "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/fetched"
+          }
+        ]
+      },
+      "description": "Policy packages that travel with the agent, keyed by name. Each entry is a reference, pinned in the lock like any other part, and it says: run me with this applied. What is inside a policy package is in the format of the evaluator that reads it: OADL links policy and does not evaluate it. A platform's own policy over every agent needs no entry here, so most agents have none.",
+      "minProperties": 1
+    },
+    "credentials": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What the credential is for, shown to whoever binds it"
+          },
+          "scopes": {
+            "type": "array",
+            "description": "Permissions the credential must grant, e.g. assets:read",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Logical credential requirements, keyed by id, e.g. asset-library. The platform binds a value to each id. No document carries a token, a secret or a key.",
+      "minProperties": 1
+    },
+    "outputs": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/output"
+      },
+      "description": "Named typed values the agent publishes for others to use. What a receiver does with an output is not defined in 0.4.",
+      "minProperties": 1
+    },
+    "extensions": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*$",
+        "not": {
+          "pattern": "\\s"
+        }
+      },
+      "description": "Data for one tool, keyed by that tool's plain name: lowercase letters, digits and hyphens, e.g. claude-code. An owner who wants a namespace of its own may use a dotted name. Every other tool skips what it finds here. Nothing under extensions is a requirement or a gate, and it never changes what a field of the format means."
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false,
+      "description": "One output: a named typed value the agent publishes",
+      "properties": {
+        "type": {
+          "type": "string",
+          "pattern": "^(string|number|bool|any|(list|set|map)\\(.+\\)|object\\(\\{.*\\}\\)|tuple\\(\\[.*\\]\\))$",
+          "description": "The type of the value: string, number, bool or any, or a list, a set, a map, an object or a tuple of those, written as in list(string)",
+          "not": {
+            "type": "string",
+            "pattern": "[\\n\\r\\t]"
+          }
+        },
+        "description": {
+          "type": "string",
+          "description": "What the output is"
+        },
+        "file": {
+          "type": "string",
+          "pattern": "^(?:[^/:\\\\.]|\\.[^/.:\\\\])(?:[^.:\\\\]|\\.[^.:\\\\])*\\.?$",
+          "description": "A JSON file in the package that holds the value, e.g. brand/colors.json. The value is pinned with the content"
+        },
+        "value": {
+          "description": "The value, when it is written in the document"
+        },
+        "sensitive": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the value is sensitive and must not be shown or logged"
+        }
+      }
+    },
+    "tool_name": {
+      "type": "string",
+      "pattern": "^[a-z0-9_][a-z0-9_.-]*$",
+      "not": {
+        "type": "string",
+        "pattern": "\\s"
+      },
+      "description": "The name of a tool: lowercase letters, digits, _, - and dots."
+    },
+    "model_name": {
+      "type": "string",
+      "pattern": "^(?:[^:]|:+(?:[^:/]|/[^/]))*(?::+/?)?$",
+      "not": {
+        "type": "string",
+        "pattern": "[\\n\\r\\t]"
+      },
+      "minLength": 1,
+      "description": "A model name: type::name, where the text before :: names the catalog the model comes from, as in ollama::llama3.2:3b or hf::<org>/<model>, or a registry address. Never an endpoint URL."
+    }
+  }
+}

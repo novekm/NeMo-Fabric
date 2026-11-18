@@ -1,0 +1,110 @@
+{
+  "mode": "graph",
+  "inventory": {
+    "root": {
+      "package": "root",
+      "path": "agent.json",
+      "type": "agent"
+    },
+    "packages": {
+      "root": {
+        "origin": {
+          "type": "local"
+        },
+        "files": {
+          "agent.json": {
+            "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+            "type": "agent",
+            "name": "_reviewer",
+            "description": "Review a rendered video",
+            "instructions": "Report every item that fails.",
+            "agents": {
+              "helper": {
+                "source": "./helper",
+                "variables": {
+                  "max_turns": 60
+                }
+              }
+            }
+          },
+          "helper/agent.json": {
+            "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+            "type": "agent",
+            "name": "helper",
+            "description": "Help with one task.",
+            "limits": {
+              "max_turns": {
+                "var": "max_turns"
+              }
+            },
+            "variables": {
+              "max_turns": {
+                "type": "number",
+                "enum": [
+                  20,
+                  40
+                ],
+                "default": 20
+              }
+            },
+            "skills": {
+              "review": {
+                "source": "./../parts/review"
+              }
+            }
+          },
+          "parts/review/SKILL.md": "---\nname: review\ndescription: Review a render\n---\nReport every item of the checklist that fails.\n"
+        },
+        "components": {
+          "parts/review": {
+            "type": "skill",
+            "dependencies": []
+          }
+        }
+      }
+    }
+  },
+  "lock": {
+    "$schema": "https://oadl.example/schemas/0.4.0/lock.schema.json",
+    "type": "lock",
+    "entries": [
+      {
+        "address": "$",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:f6a12d79b7125f3b782a8b84acde1ad41e07ddd57dcaabd6fa13e75d6396f35d",
+        "dependencies": [
+          "$/agents/helper"
+        ]
+      },
+      {
+        "address": "$/agents/helper",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./helper/agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:9e828025d0a3dc222826d17b566592cedd111258dddbdc8987965f2247ca2d96",
+        "dependencies": [
+          "$/agents/helper/skills/review"
+        ]
+      },
+      {
+        "address": "$/agents/helper/skills/review",
+        "type": "skill",
+        "source": {
+          "type": "local",
+          "url": "./parts/review"
+        },
+        "version": "local",
+        "digest": "sha256:8f89569ad30f380b1b7cef127bee2f8a45d87bf242a994973a93713055601f5a",
+        "dependencies": []
+      }
+    ]
+  }
+}

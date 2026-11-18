@@ -1,0 +1,86 @@
+{
+  "mode": "graph",
+  "inventory": {
+    "root": {
+      "package": "root",
+      "path": "agent.json",
+      "type": "agent"
+    },
+    "packages": {
+      "root": {
+        "origin": {
+          "type": "local"
+        },
+        "files": {
+          "agent.json": {
+            "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+            "type": "agent",
+            "name": "_reviewer",
+            "description": "Review a rendered video",
+            "instructions": "Report every item that fails.",
+            "agents": {
+              "helper": {
+                "source": "./helper"
+              }
+            }
+          },
+          "helper/agent.json": {
+            "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+            "type": "agent",
+            "name": "helper"
+          },
+          "parts/review/SKILL.md": "---\nname: review\ndescription: Review a render\n---\nReport every item of the checklist that fails.\n"
+        },
+        "components": {
+          "parts/review": {
+            "type": "skill",
+            "dependencies": []
+          }
+        }
+      }
+    }
+  },
+  "lock": {
+    "$schema": "https://oadl.example/schemas/0.4.0/lock.schema.json",
+    "type": "lock",
+    "entries": [
+      {
+        "address": "$",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:9f8497c947da9ee028487e16d1fbb9aa628405328cc49fd26873eb5343c64c43",
+        "dependencies": [
+          "$/agents/helper"
+        ]
+      },
+      {
+        "address": "$/agents/helper",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./helper/agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:3e0608c9cd128709010ceff75457d534ea7eb621fc07bd553582d092b281686c",
+        "dependencies": [
+          "$/agents/helper/skills/review"
+        ]
+      },
+      {
+        "address": "$/agents/helper/skills/review",
+        "type": "skill",
+        "source": {
+          "type": "local",
+          "url": "./parts/review"
+        },
+        "version": "local",
+        "digest": "sha256:8f89569ad30f380b1b7cef127bee2f8a45d87bf242a994973a93713055601f5a",
+        "dependencies": []
+      }
+    ]
+  }
+}

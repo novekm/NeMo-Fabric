@@ -1,0 +1,24 @@
+{
+  "mode": "definition",
+  "definition": {
+    "$schema": "https://oadl.example/schemas/0.4.0/agent-definition.schema.json",
+    "type": "agent-definition",
+    "name": "weekly-report",
+    "agent": {
+      "source": "./agent.json"
+    },
+    "description": "The weekly report.",
+    "variables": {
+      "job": "Summarize the week.",
+      "max_turns": 8
+    }
+  },
+  "agent": {
+    "$schema": "https://oadl.example/schemas/0.4.0/agent-definition.schema.json",
+    "type": "agent-definition",
+    "name": "another",
+    "agent": {
+      "source": "./agent.json"
+    }
+  }
+}

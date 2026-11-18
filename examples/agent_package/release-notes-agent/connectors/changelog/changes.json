@@ -1,0 +1,18 @@
+[
+  {
+    "kind": "added",
+    "text": "The export command takes --format csv."
+  },
+  {
+    "kind": "changed",
+    "text": "The --verbose option now prints one line for each file. Scripts that read the old summary line need the new --summary option."
+  },
+  {
+    "kind": "fixed",
+    "text": "A file name with a space no longer stops the import."
+  },
+  {
+    "kind": "internal",
+    "text": "The test suite runs in parallel."
+  }
+]

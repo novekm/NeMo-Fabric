@@ -6,6 +6,7 @@
 pub mod adapter_contract;
 pub mod agent_config;
 pub mod agent_execution;
+pub mod agent_package;
 pub mod check;
 pub mod config;
 pub mod doctor;

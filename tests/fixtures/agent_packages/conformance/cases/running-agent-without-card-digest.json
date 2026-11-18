@@ -1,0 +1,49 @@
+{
+  "mode": "lock",
+  "lock": {
+    "$schema": "https://oadl.example/schemas/0.4.0/lock.schema.json",
+    "type": "lock",
+    "entries": [
+      {
+        "address": "$",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "dependencies": [
+          "$/connectors/asset-library",
+          "$/skills/review"
+        ]
+      },
+      {
+        "address": "$/skills/review",
+        "type": "skill",
+        "source": {
+          "type": "git",
+          "url": "https://git.example.com/media-team/agent-parts.git",
+          "subpath": "skills/review"
+        },
+        "version": "1.0.0",
+        "constraint": "1.0.0",
+        "commit": "0123456789abcdef0123456789abcdef01234567",
+        "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "dependencies": []
+      },
+      {
+        "address": "$/connectors/asset-library",
+        "type": "agent",
+        "source": {
+          "type": "pointer"
+        },
+        "version": "2.3.0",
+        "interface": {
+          "declared_version": "2.3.0"
+        },
+        "dependencies": []
+      }
+    ]
+  }
+}

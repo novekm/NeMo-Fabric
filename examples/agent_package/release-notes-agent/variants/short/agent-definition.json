@@ -1,0 +1,18 @@
+{
+  "$schema": "https://oadl.example/schemas/0.4.0/agent-definition.schema.json",
+  "type": "agent-definition",
+  "name": "release-notes-short",
+  "description": "The release notes agent, held to a short summary.",
+  "agent": {
+    "source": "./../../agent.json"
+  },
+  "instructions": "Keep the notes to five lines in all. When there are more changes than lines, keep the ones a user notices first.",
+  "skills": {
+    "short-form": {
+      "source": "./skills/short-form"
+    }
+  },
+  "limits": {
+    "max_turns": 6
+  }
+}

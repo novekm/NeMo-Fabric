@@ -1,0 +1,88 @@
+{
+  "mode": "graph",
+  "inventory": {
+    "root": {
+      "package": "root",
+      "path": "agent.json",
+      "type": "agent"
+    },
+    "packages": {
+      "root": {
+        "origin": {
+          "type": "local"
+        },
+        "files": {
+          "agent.json": {
+            "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+            "type": "agent",
+            "name": "_reviewer",
+            "description": "Review a rendered video",
+            "instructions": "Report every item that fails.",
+            "model": {
+              "source": "ollama::llama3.2:3b",
+              "revision": "a80c4f17acd5",
+              "parameters": {
+                "temperature": 0.0
+              }
+            },
+            "skills": {
+              "_review": {
+                "source": "./parts/review"
+              }
+            }
+          },
+          "parts/review/SKILL.md": "---\nname: review\ndescription: Review a render\n---\nReport every item of the checklist that fails.\n"
+        },
+        "components": {
+          "parts/review": {
+            "type": "skill",
+            "dependencies": []
+          }
+        }
+      }
+    }
+  },
+  "lock": {
+    "$schema": "https://oadl.example/schemas/0.4.0/lock.schema.json",
+    "type": "lock",
+    "entries": [
+      {
+        "address": "$",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:ce252938a03e95c1e760a8c9189e27e15a7270c44c44cbdc52597965f5a507e2",
+        "dependencies": [
+          "$/model",
+          "$/skills/_review"
+        ]
+      },
+      {
+        "address": "$/model",
+        "type": "model",
+        "source": {
+          "type": "pointer"
+        },
+        "version": "a80c4f17acd5",
+        "interface": {
+          "declared_version": "a80c4f17acd5"
+        },
+        "dependencies": []
+      },
+      {
+        "address": "$/skills/_review",
+        "type": "skill",
+        "source": {
+          "type": "local",
+          "url": "./parts/review"
+        },
+        "version": "local",
+        "digest": "sha256:8f89569ad30f380b1b7cef127bee2f8a45d87bf242a994973a93713055601f5a",
+        "dependencies": []
+      }
+    ]
+  }
+}

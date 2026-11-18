@@ -1,0 +1,114 @@
+{
+  "mode": "graph",
+  "inventory": {
+    "root": {
+      "package": "root",
+      "path": "agent-definition.json",
+      "type": "agent-definition"
+    },
+    "packages": {
+      "root": {
+        "origin": {
+          "type": "local"
+        },
+        "files": {
+          "agent-definition.json": {
+            "$schema": "https://oadl.example/schemas/0.4.0/agent-definition.schema.json",
+            "type": "agent-definition",
+            "name": "ada-release-notes",
+            "agent": {
+              "source": "./agent.json"
+            },
+            "description": "Release notes for the payments team.",
+            "variables": {
+              "job": "Draft release notes from the merged changes.",
+              "max_turns": 60
+            }
+          },
+          "agent.json": {
+            "$schema": "https://oadl.example/schemas/0.4.0/agent.schema.json",
+            "type": "agent",
+            "name": "team-assistant",
+            "description": "Answer the team's questions.",
+            "instructions": {
+              "var": "job"
+            },
+            "limits": {
+              "max_turns": {
+                "var": "max_turns"
+              }
+            },
+            "variables": {
+              "job": {
+                "type": "string"
+              },
+              "max_turns": {
+                "type": "number",
+                "enum": [
+                  20,
+                  40
+                ],
+                "default": 20
+              }
+            },
+            "skills": {
+              "review": {
+                "source": "./parts/review"
+              }
+            }
+          },
+          "parts/review/SKILL.md": "---\nname: review\ndescription: Review a render\n---\nReport every item of the checklist that fails.\n"
+        },
+        "components": {
+          "parts/review": {
+            "type": "skill",
+            "dependencies": []
+          }
+        }
+      }
+    }
+  },
+  "lock": {
+    "$schema": "https://oadl.example/schemas/0.4.0/lock.schema.json",
+    "type": "lock",
+    "entries": [
+      {
+        "address": "$",
+        "type": "agent-definition",
+        "source": {
+          "type": "local",
+          "url": "./agent-definition.json"
+        },
+        "version": "local",
+        "digest": "sha256:c470016ca791f44caf0d47cb668208fab42b09f262d71bf0c97c4f3eeb166bc7",
+        "dependencies": [
+          "$/agent"
+        ]
+      },
+      {
+        "address": "$/agent",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:ba81feaf4718187b5d5dafcb38279dbfeabf26d410fdd9700dcbc792bd37d6fb",
+        "dependencies": [
+          "$/agent/skills/review"
+        ]
+      },
+      {
+        "address": "$/agent/skills/review",
+        "type": "skill",
+        "source": {
+          "type": "local",
+          "url": "./parts/review"
+        },
+        "version": "local",
+        "digest": "sha256:8f89569ad30f380b1b7cef127bee2f8a45d87bf242a994973a93713055601f5a",
+        "dependencies": []
+      }
+    ]
+  }
+}

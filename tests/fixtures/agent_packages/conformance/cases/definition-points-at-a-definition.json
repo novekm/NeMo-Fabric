@@ -1,0 +1,89 @@
+{
+  "mode": "graph",
+  "inventory": {
+    "root": {
+      "package": "root",
+      "path": "agent-definition.json",
+      "type": "agent-definition"
+    },
+    "packages": {
+      "root": {
+        "origin": {
+          "type": "local"
+        },
+        "files": {
+          "agent-definition.json": {
+            "$schema": "https://oadl.example/schemas/0.4.0/agent-definition.schema.json",
+            "type": "agent-definition",
+            "name": "ada-release-notes",
+            "agent": {
+              "source": "./agent.json"
+            },
+            "description": "Release notes for the payments team.",
+            "variables": {
+              "job": "Draft release notes from the merged changes."
+            }
+          },
+          "agent.json": {
+            "$schema": "https://oadl.example/schemas/0.4.0/agent-definition.schema.json",
+            "type": "agent-definition",
+            "name": "another",
+            "agent": {
+              "source": "./agent.json"
+            }
+          },
+          "parts/review/SKILL.md": "---\nname: review\ndescription: Review a render\n---\nReport every item of the checklist that fails.\n"
+        },
+        "components": {
+          "parts/review": {
+            "type": "skill",
+            "dependencies": []
+          }
+        }
+      }
+    }
+  },
+  "lock": {
+    "$schema": "https://oadl.example/schemas/0.4.0/lock.schema.json",
+    "type": "lock",
+    "entries": [
+      {
+        "address": "$",
+        "type": "agent-definition",
+        "source": {
+          "type": "local",
+          "url": "./agent-definition.json"
+        },
+        "version": "local",
+        "digest": "sha256:fe67fdebca77d71fb7c69a53f5f92d04fe984664e3821b1cdbcc008b4e8831e9",
+        "dependencies": [
+          "$/agent"
+        ]
+      },
+      {
+        "address": "$/agent",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:05801cab420d64e393ef8ab5ffa66e38c15005950442745e99795fcd7713efb0",
+        "dependencies": [
+          "$/agent/skills/review"
+        ]
+      },
+      {
+        "address": "$/agent/skills/review",
+        "type": "skill",
+        "source": {
+          "type": "local",
+          "url": "./parts/review"
+        },
+        "version": "local",
+        "digest": "sha256:8f89569ad30f380b1b7cef127bee2f8a45d87bf242a994973a93713055601f5a",
+        "dependencies": []
+      }
+    ]
+  }
+}

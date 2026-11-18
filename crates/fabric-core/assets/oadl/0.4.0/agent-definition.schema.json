@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oadl.example/schemas/0.4.0/agent-definition.schema.json",
+  "title": "OADL 0.4 agent-definition",
+  "description": "A definition: a pointer to one agent, values for that agent's variables, and what it adds to that agent. It means: that agent, with these values and these additions. A variable is a blank in an agent; a definition is one saved set of answers for those blanks, with a name and a version, so nobody types them again. A definition may add and tighten, and it never replaces. It may add parts under names the agent does not use, add tools, state lower limits, state needs under runtime, and add instruction text that is placed after the agent's. A receiver reads the agent and the definition together: an entry whose name the agent already uses is refused unless the two entries are identical, for each limit the smaller number applies, every need of both applies, and everything else stays as the agent says. A definition has no model field, declares no variable and has no outputs, so nothing in it is a variable reference. It means nothing without the agent it points at: to change or remove something the agent has, copy the agent.",
+  "type": "object",
+  "required": [
+    "$schema",
+    "type",
+    "name",
+    "agent"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://oadl.example/schemas/0.4.0/agent-definition.schema.json",
+      "description": "The URL of the schema this document conforms to. It gives the document type and the OADL version."
+    },
+    "type": {
+      "const": "agent-definition",
+      "description": "Document type; always agent-definition."
+    },
+    "name": {
+      "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/name",
+      "description": "The definition's name, kept as written."
+    },
+    "description": {
+      "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/description",
+      "description": "What this definition is for."
+    },
+    "agent": {
+      "type": "object",
+      "required": [
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/source",
+          "description": "Where the agent comes from: ./path, or type::address such as git:: or oci::."
+        },
+        "version": {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/version",
+          "description": "The version to select. Required unless the source is local."
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/version_rule"
+        },
+        {
+          "$ref": "https://oadl.example/schemas/0.4.0/reference.schema.json#/$defs/fetched"
+        }
+      ],
+      "description": "The one agent this definition points at: a source, and a version unless the source is local. The definition's lock pins it."
+    },
+    "variables": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      },
+      "minProperties": 1,
+      "description": "Values for the agent's variables, written {\"<name>\": value}. A value for a name the agent does not declare is refused. A value given when the agent is started comes before the one written here."
+    },
+    "instructions": {
+      "allOf": [
+        {
+          "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/instructions"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "Instruction text this definition adds. The agent's own text stays and comes first, and this text is placed after it. Nothing replaces the agent's text. It is written in place, never as a variable reference."
+    },
+    "limits": {
+      "allOf": [
+        {
+          "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/limits"
+        },
+        {
+          "additionalProperties": {
+            "type": "number"
+          }
+        }
+      ],
+      "description": "Limits this definition tightens, in the shape of an agent's limits. For each limit the smaller number applies. A larger number than the agent's is not an error: the agent's number applies, and the receiver reports it. Each number is written in place, never as a variable reference."
+    },
+    "skills": {
+      "allOf": [
+        {
+          "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/skills"
+        },
+        {
+          "additionalProperties": {
+            "properties": {
+              "variables": {
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "Skills this definition adds, keyed by name, in the shape of an agent's skills. A name the agent already uses is refused unless the two entries are identical. A value on an entry is written in place."
+    },
+    "plugins": {
+      "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/plugins",
+      "description": "Plugins this definition adds, keyed by name, in the shape of an agent's plugins. A name the agent already uses is refused unless the two entries are identical."
+    },
+    "connectors": {
+      "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/connectors",
+      "description": "Connectors this definition adds, keyed by name, in the shape of an agent's connectors. A name the agent already uses is refused unless the two entries are identical."
+    },
+    "hooks": {
+      "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/hooks",
+      "description": "Hooks this definition adds, keyed by name, in the shape of an agent's hooks. A name the agent already uses is refused unless the two entries are identical."
+    },
+    "tools": {
+      "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/tools",
+      "description": "Tools this definition adds to the agent's list: a built-in tool, or a tool of a connector the agent or this definition has. A tool the agent already lists is kept once."
+    },
+    "custom_tools": {
+      "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/custom_tools",
+      "description": "Tools the host application implements that this definition adds, keyed by name. A name the agent already uses is refused unless the two entries are identical."
+    },
+    "packages": {
+      "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/packages",
+      "description": "Software this definition adds, fetched from its own registry and pinned, keyed by name. A name the agent already uses is refused unless the two entries are identical."
+    },
+    "runtime": {
+      "allOf": [
+        {
+          "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/runtime"
+        },
+        {
+          "properties": {
+            "harness": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "What the agent needs where it runs when it is started from this definition, in the shape of an agent's runtime block. Every need of the agent and every need stated here applies: each is checked on its own and reported with the document it came from, and nothing is combined or weakened. An author who ships several definitions of one agent states it on each, so whoever places the agent can match a definition to a machine. Left out, a definition is chosen by name. Nothing in the document selects a definition or enforces the match. A definition declares no variable, so nothing here is a variable reference."
+    },
+    "agents": {
+      "allOf": [
+        {
+          "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/agents"
+        },
+        {
+          "additionalProperties": {
+            "properties": {
+              "variables": {
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "Agents this definition adds to those the agent may call, keyed by name, in the shape of an agent's agents. A name the agent already uses is refused unless the two entries are identical. A value on an entry is written in place."
+    },
+    "policies": {
+      "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/policies",
+      "description": "Policy packages this definition adds, keyed by name, in the shape of an agent's policies. A name the agent already uses is refused unless the two entries are identical."
+    },
+    "credentials": {
+      "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/credentials",
+      "description": "Logical credential requirements this definition adds, keyed by id. Never a value. An id the agent already uses is refused unless the two entries are identical."
+    },
+    "extensions": {
+      "$ref": "https://oadl.example/schemas/0.4.0/agent.schema.json#/$defs/extensions",
+      "description": "Data for one tool, keyed by that tool's name. Every other tool skips it."
+    }
+  }
+}
