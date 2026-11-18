@@ -618,6 +618,54 @@ def _load_report(
         ) from error
 
 
+_CHECKER_OPTIONS = (
+    "checker",
+    "checker_url",
+    "checker_enforcers",
+    "checker_timeout_seconds",
+)
+
+
+def agent_package_start_facts(
+    package_dir: str | os.PathLike[str],
+    config: FabricConfig | None = None,
+    *,
+    enforcers: Sequence[str] = (),
+    **options: Any,
+) -> dict[str, Any]:
+    """The facts NeMo Fabric sends a checker URL about a package, without starting anything.
+
+    The package is loaded as ``load_agent_package`` loads it, with the same
+    ``config`` and options, and no checker is asked. The answer is the JSON
+    object ``checker_url`` posts, built by the same code: the agent's name and
+    package digest, each part with its type, source, version, digest and
+    whether it is local, the models named, and the policies with the
+    enforcers each needs. ``enforcers`` is what ``checker_enforcers`` would
+    send.
+
+    Raises:
+        FabricConfigError: As ``load_agent_package`` raises it, and with code
+            ``package_options_invalid`` for a checker option.
+    """
+    named = sorted(name for name in options if name in _CHECKER_OPTIONS)
+    if named:
+        raise FabricConfigError(
+            f"{named[0]} asks a checker; the facts are built without one",
+            stage=_STAGE,
+            code="package_options_invalid",
+            details={"subject": named[0]},
+        )
+    from nemo_fabric.client import Fabric
+
+    report = load_agent_package(package_dir, config, **options)
+    native = Fabric()._require_native_module("agent_package_start_facts")
+    return json.loads(
+        native.agent_package_start_facts(
+            json.dumps(report.to_dict()), json.dumps(list(enforcers))
+        )
+    )
+
+
 class AgentPackageFetchReport(FabricMapping):
     """What one agent package fetch placed and what it left.
 

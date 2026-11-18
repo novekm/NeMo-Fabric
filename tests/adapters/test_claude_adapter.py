@@ -254,6 +254,34 @@ def test_claude_descriptor_is_narrow_and_versioned():
                     ],
                     "description": "Claude permission handling mode.",
                 },
+                "nemo_guardrails": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "pattern": "^https?://",
+                            "description": "The NeMo Guardrails hooks server, such as http://127.0.0.1:8100.",
+                        },
+                        "agent_name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The agent's name in the x-nemo-agent-name header. start_agent_package sets it to the package's name.",
+                        },
+                        "agent_digest": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The agent package's digest in the x-nemo-agent-digest header. start_agent_package sets it to the sha256 of the lock.",
+                        },
+                        "timeout_seconds": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "description": "How long a check may take before the call is denied. Default 30.",
+                        },
+                    },
+                    "required": ["url"],
+                    "additionalProperties": False,
+                    "description": "Ask a NeMo Guardrails hooks server about every tool call, naming the run and the agent.",
+                },
             },
             "required": [],
             "additionalProperties": False,
@@ -2709,3 +2737,128 @@ def test_claude_relay_reports_invalid_or_unsupported_http_model_hosts(
     assert caught.value.code == "claude_relay_invalid_http_model_hosts"
     assert isinstance(caught.value.__cause__, adapter.RelayHttpModelError)
     write_configs.assert_not_called()
+
+
+class _GuardrailsStub:
+    """A local NeMo Guardrails hooks server that stops every call and keeps what it was sent."""
+
+    def __init__(self) -> None:
+        import http.server
+        import threading
+
+        self.requests: list[tuple[str, dict[str, str], dict[str, Any]]] = []
+        stub = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802 - the name http.server calls
+                length = int(self.headers["Content-Length"])
+                body = json.loads(self.rfile.read(length))
+                stub.requests.append(
+                    (self.path, {k.lower(): v for k, v in self.headers.items()}, body)
+                )
+                answer = json.dumps(
+                    {
+                        "continue": False,
+                        "stopReason": "NeMo Guardrails: stop",
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": "NeMo Guardrails: stop",
+                        },
+                    }
+                ).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(answer)))
+                self.end_headers()
+                self.wfile.write(answer)
+
+            def log_message(self, *args):
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def _guardrails_hook(options: ClaudeAgentOptions):
+    (hook,) = [
+        hook
+        for matcher in options.hooks["PreToolUse"]
+        for hook in matcher.hooks
+        if hook.__name__ == "ask_guardrails"
+    ]
+    return hook
+
+
+async def test_the_guardrails_hook_sends_each_tool_call_with_the_run_and_the_agent(
+    claude_payload, monkeypatch
+):
+    stub = _GuardrailsStub()
+    monkeypatch.setenv("FABRIC_RUNTIME_ID", "runtime-7")
+    claude_payload["config"]["harness"]["settings"]["nemo_guardrails"] = {
+        "url": stub.url,
+        "agent_name": "release-reviewer",
+        "agent_digest": "sha256:abc",
+    }
+    try:
+        hook = _guardrails_hook(build_options(claude_payload))
+        hook_input = {
+            "session_id": "s",
+            "transcript_path": "/t",
+            "cwd": "/w",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls", "dangerouslyDisableSandbox": True},
+        }
+        output = await hook(hook_input, "toolu_1", {"signal": None})
+    finally:
+        stub.close()
+
+    ((path, headers, body),) = stub.requests
+    assert path == "/v1/hooks/claude-code"
+    assert (
+        headers["x-nemo-run-id"],
+        headers["x-nemo-agent-name"],
+        headers["x-nemo-agent-digest"],
+    ) == (
+        "runtime-7",
+        "release-reviewer",
+        "sha256:abc",
+    )
+    assert body == {**hook_input, "tool_use_id": "toolu_1"}
+    # The SDK's name for `continue`, so Claude Code ends the run.
+    assert output["continue_"] is False and "continue" not in output
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+async def test_a_guardrails_server_that_does_not_answer_denies_the_call(claude_payload):
+    claude_payload["config"]["harness"]["settings"]["nemo_guardrails"] = {
+        "url": "http://127.0.0.1:9",
+        "timeout_seconds": 2,
+    }
+    hook = _guardrails_hook(build_options(claude_payload))
+    output = await hook(
+        {"tool_name": "Read", "tool_input": {}}, "toolu_2", {"signal": None}
+    )
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "did not answer" in output["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_the_guardrails_setting_is_validated_by_the_manifest():
+    manifest = json.loads(
+        (ROOT / "adapters/python/claude/claude.fabric-adapter.json").read_text()
+    )
+    schema = manifest["settings_schema"]
+    jsonschema.validate({"nemo_guardrails": {"url": "http://127.0.0.1:8100"}}, schema)
+    for bad in (
+        {"nemo_guardrails": {}},
+        {"nemo_guardrails": {"url": "ftp://x"}},
+        {"nemo_guardrails": {"url": "http://x", "y": 1}},
+    ):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(bad, schema)
