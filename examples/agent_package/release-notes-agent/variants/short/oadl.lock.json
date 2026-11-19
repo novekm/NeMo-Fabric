@@ -1,0 +1,68 @@
+{
+  "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/lock.schema.json",
+  "type": "lock",
+  "generator": "nemo-fabric-examples",
+  "entries": [
+    {
+      "address": "$",
+      "type": "agent-definition",
+      "source": {
+        "type": "local",
+        "url": "./agent-definition.json"
+      },
+      "version": "local",
+      "digest": "sha256:9845960aa9681212ac1160f0d3fbec3353dca0e32cf9ab9e5694ee1214d8aa12",
+      "dependencies": [
+        "$/agent",
+        "$/skills/short-form"
+      ]
+    },
+    {
+      "address": "$/agent",
+      "type": "agent",
+      "source": {
+        "type": "local",
+        "url": "./../../agent.json"
+      },
+      "version": "local",
+      "digest": "sha256:e60afde2a4fab86fe194ed559da713449b825c40f269cfb95da24a03bdf02580",
+      "dependencies": [
+        "$/agent/connectors/changelog",
+        "$/agent/skills/release-notes"
+      ]
+    },
+    {
+      "address": "$/agent/connectors/changelog",
+      "type": "connector",
+      "source": {
+        "type": "local",
+        "url": "./../../connectors/changelog"
+      },
+      "version": "local",
+      "digest": "sha256:46d4fc7e05ba55c836dbf121149cf4f1d51182ad6ad0cc96449708deb59abe94",
+      "dependencies": []
+    },
+    {
+      "address": "$/agent/skills/release-notes",
+      "type": "skill",
+      "source": {
+        "type": "local",
+        "url": "./../../skills/release-notes"
+      },
+      "version": "local",
+      "digest": "sha256:3a4ca8bf2c57775086c62305d78266bdb11c18aff6d5d9979aeeaa6983e2bf46",
+      "dependencies": []
+    },
+    {
+      "address": "$/skills/short-form",
+      "type": "skill",
+      "source": {
+        "type": "local",
+        "url": "./skills/short-form"
+      },
+      "version": "local",
+      "digest": "sha256:2fdebfed8829ce47467b14fc5cc551d23ab19823b34296ac2b28e2c350f8532e",
+      "dependencies": []
+    }
+  ]
+}

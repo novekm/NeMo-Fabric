@@ -1,0 +1,19 @@
+{
+  "mode": "document",
+  "document": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+    "type": "agent",
+    "name": "example",
+    "connectors": {
+      "render-queue": {
+        "source": "./connectors/render-queue"
+      }
+    },
+    "tools": [
+      {
+        "connector": "mail",
+        "tool": "send"
+      }
+    ]
+  }
+}

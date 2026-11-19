@@ -1,0 +1,54 @@
+---
+title: "Runtime Needs and Facts"
+description: "How the loader decides whether the place an agent runs meets what the agent asks for."
+---
+{/* SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 */}
+
+## Runtime Needs
+
+An agent states what it needs from the place it runs in under `runtime`, and what it needs from any model under `model`. The loader gives each need one status:
+
+| Status | Meaning |
+| --- | --- |
+| `met_here` | The need is met where the agent runs. |
+| `met_remotely` | The need is met through the connector the line names. |
+| `not_met` | The need is not met. |
+| `could_not_be_checked` | The loader has no fact to compare with. It is never counted as met. |
+
+The loader compares each need with facts. Facts come from two places, and a fact you pass wins over a probed one:
+
+- **The `facts` argument.** Pass what your platform knows. For example, `facts={"memory": "64gb", "network": "internal"}`. The table below lists every fact.
+- **The machine, when `check_machine=True`.** The loader then reads the processor count, the memory, the free storage under `base_dir`, the number of GPUs that `nvidia-smi` lists with the memory of each, and whether each named program is on `PATH`. Probing is off by default.
+
+The following table lists the facts you can pass. The `facts` member of `schemas/sdk/agent-package-options.schema.json` states the same shapes.
+
+| Fact | Shape | Example |
+| --- | --- | --- |
+| `cpus` | A whole number. | `8` |
+| `memory`, `storage` | A size: a number and a lower-case unit, `kb`, `mb`, `gb` or `tb`. | `"64gb"` |
+| `network` | `none`, `internal` or `external`. | `"internal"` |
+| `harness` | The name this harness goes by. | `"my-harness"` |
+| `harness_aliases` | A list of other names of this harness. | `["mine"]` |
+| `gpus` | A list with one object for each GPU. Its members are `memory` (a size), `family`, `model`, and `interface`: an object with one member for each interface, each an object with an optional `version` and `compute_capability`. | `[{"memory": "24gb", "interface": {"cuda": {"version": "12.4"}}}]` |
+| `remote_gpus` | The same as `gpus`, and each object also names the `connector` the GPU is reached through. | `[{"memory": "48gb", "connector": "render-queue"}]` |
+| `software` | An object with one member for each program on the machine: its version, or `null` when the version is not known. | `{"python3": "3.12", "ffmpeg": null}` |
+| `packages` | An object with one member for each registry, named as a lock names it. Each registry is an object with one member for each installed package: its version, or `null` when the version is not known. Refer to [Software Packages](./parts-and-bindings.mdx#software-packages). | `{"pypi": {"faster-whisper": "1.2.1"}}` |
+| `model` | An object with `name`, `capabilities` (a list), `context_tokens` (a whole number) and `parameters_applied` (a list). | `{"capabilities": ["vision"], "context_tokens": 128000}` |
+| `known` | Names your platform knows, as lists: `interfaces`, `families`, `capabilities` and `harnesses`. | `{"harnesses": ["claude-code"]}` |
+
+A fact you pass must be one the loader can read. A fact with another name, a member with another name inside a fact, or a value in another form is refused with `package_options_invalid`, and the refusal names it, for example `facts.model.context` or `facts.gpus.0.memory`.
+
+A `software` fact lists every program on the machine. A program you leave out is taken as not there, so a need for it is `not_met`. Pass `null` for a program that is there when you do not know its version. To say nothing about software, leave the `software` fact out. With `check_machine=True`, the loader first looks for each program the documents name, and the programs you pass are laid over that result.
+
+The probe reads no interface, family or model of a GPU. A GPU need that names one of those is `could_not_be_checked` unless you pass the `gpus` fact with those members. A GPU fact with no `interface` member is no fact about interfaces: it never makes a need `not_met`.
+
+The loader never runs a program because a document names it. It runs only version commands from its own fixed list. A program that is on `PATH` and not on that list is `could_not_be_checked`. So is a program whose name holds a path separator, because only a bare name is looked up.
+
+With neither a fact nor a probe, a need is `could_not_be_checked`. The network reach is never probed: pass the reach your platform allows as the `network` fact. An agent that is allowed less reach than it asks for has a need that is `not_met`.
+
+For `runtime.harness`, this harness goes by the selected adapter's id, by the last segment of that id, and by the `harness` fact when you pass one. A document that names one of those is `met_here`. A document that names another adapter NeMo Fabric can discover, or a name in `known.harnesses`, is `not_met`. Any other name is `could_not_be_checked`.
+
+Every need that is not met is in the report with the author's reason, unchanged, and with whether it is required or optional.
+
+A load done on a host only to read digests leaves `check_machine` off. The machine that matters is the one the agent runs on.

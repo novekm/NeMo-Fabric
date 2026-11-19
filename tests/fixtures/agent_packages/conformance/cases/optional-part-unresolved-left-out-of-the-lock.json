@@ -1,0 +1,81 @@
+{
+  "mode": "graph",
+  "inventory": {
+    "root": {
+      "package": "root",
+      "path": "agent.json",
+      "type": "agent"
+    },
+    "packages": {
+      "root": {
+        "origin": {
+          "type": "local"
+        },
+        "files": {
+          "agent.json": {
+            "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+            "type": "agent",
+            "name": "_reviewer",
+            "description": "Review a rendered video",
+            "instructions": "Report every item that fails.",
+            "skills": {
+              "review": {
+                "source": "./parts/review"
+              }
+            },
+            "agents": {
+              "translator": {
+                "source": "a2a::https://agents.example.com/translator",
+                "version": "2.1.0",
+                "optional": true
+              }
+            }
+          },
+          "parts/review/SKILL.md": "---\nname: review\ndescription: Review a render\n---\nReport every item of the checklist that fails.\n"
+        },
+        "components": {
+          "parts/review": {
+            "type": "skill",
+            "dependencies": []
+          }
+        }
+      }
+    }
+  },
+  "lock": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/lock.schema.json",
+    "type": "lock",
+    "entries": [
+      {
+        "address": "$",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:83b4ad50ef339f535c93a4d6c515e22e54310936d303c6942ae31f385e1ecdb5",
+        "dependencies": [
+          "$/skills/review"
+        ]
+      },
+      {
+        "address": "$/skills/review",
+        "type": "skill",
+        "source": {
+          "type": "local",
+          "url": "./parts/review"
+        },
+        "version": "local",
+        "digest": "sha256:8f89569ad30f380b1b7cef127bee2f8a45d87bf242a994973a93713055601f5a",
+        "dependencies": []
+      }
+    ]
+  },
+  "required_addresses": [
+    "$/skills/review"
+  ],
+  "absent_addresses": [
+    "$/agents/translator"
+  ]
+}

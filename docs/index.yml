@@ -73,6 +73,24 @@ navigation:
       path: ./sdk/streaming.mdx
     - page: Results and Errors
       path: ./sdk/results-and-errors.mdx
+    - section: Agent Packages
+      path: ./sdk/agent-packages.mdx
+      collapsed: true
+      contents:
+      - page: Package Format and Schema Versions
+        path: ./sdk/agent-packages/format-and-versions.mdx
+      - page: Load and Start a Package
+        path: ./sdk/agent-packages/load-and-start.mdx
+      - page: Fetch What a Lock Pins
+        path: ./sdk/agent-packages/fetch.mdx
+      - page: Map a Package Onto a Config
+        path: ./sdk/agent-packages/map-onto-a-config.mdx
+      - page: Connectors, Plugins, Tools and Bindings
+        path: ./sdk/agent-packages/parts-and-bindings.mdx
+      - page: Runtime Needs and Facts
+        path: ./sdk/agent-packages/runtime-needs.mdx
+      - page: Reference
+        path: ./sdk/agent-packages/reference.mdx
     - page: Health Checks
       path: ./sdk/health-checks.mdx
     - page: Resource Usage and Stats
@@ -213,6 +231,8 @@ navigation:
       path: ./reference/api/python-library-reference/nemo_fabric.client.md
     - page: Adapter Capability Inspection
       path: ./reference/api/python-library-reference/nemo_fabric.capabilities.md
+    - page: Agent Packages
+      path: ./reference/api/python-library-reference/nemo_fabric.agent_package.md
     - page: Runtime Health
       path: ./reference/api/python-library-reference/nemo_fabric.check.md
     - page: Runtime

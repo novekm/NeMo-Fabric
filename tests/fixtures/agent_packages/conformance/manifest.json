@@ -1,0 +1,407 @@
+{
+  "format": "oadl-0.0.1-offline-fixtures/1",
+  "source_manifest_sha256": "268a3d0511d3644b3a893b75b1ff347f49bd405c63b6c8cbe5bb18e4d69d0b0e",
+  "source_cases": 811,
+  "cases": [
+    {
+      "path": "cases/agent-three-required-fields.json",
+      "error": null,
+      "requirement": "C00-DOC-01"
+    },
+    {
+      "path": "cases/lock-three-entries.json",
+      "error": null,
+      "requirement": "C00-DOC-01"
+    },
+    {
+      "path": "cases/document-is-a-list.json",
+      "error": "document.object",
+      "requirement": "C00-DOC-01"
+    },
+    {
+      "path": "cases/type-does-not-match-schema.json",
+      "error": "document.version",
+      "requirement": "C00-DOC-01"
+    },
+    {
+      "path": "cases/type-missing.json",
+      "error": "document.type",
+      "requirement": "C00-DOC-01"
+    },
+    {
+      "path": "cases/agent-without-name.json",
+      "error": "schema:/ required:",
+      "requirement": "C00-DOC-01"
+    },
+    {
+      "path": "cases/lock-unknown-field.json",
+      "error": "schema:/ additionalProperties:",
+      "requirement": "C00-DOC-01"
+    },
+    {
+      "path": "cases/whole-agent-runs-without-a-definition.json",
+      "error": null,
+      "requirement": "C00-BASE-01"
+    },
+    {
+      "path": "cases/variable-default-outside-its-allowed-values.json",
+      "error": "document.variable_default:model",
+      "requirement": "C00-VAR-09"
+    },
+    {
+      "path": "cases/variable-minimum-greater-than-maximum.json",
+      "error": "document.variable_bounds:max_turns",
+      "requirement": "C00-VAR-10"
+    },
+    {
+      "path": "cases/reference-to-a-variable-that-is-not-declared.json",
+      "error": "document.variable_undeclared:job",
+      "requirement": "C00-VAR-02"
+    },
+    {
+      "path": "cases/reference-of-another-type-than-its-place.json",
+      "error": "document.variable_type:job",
+      "requirement": "C00-VAR-07"
+    },
+    {
+      "path": "cases/distinct-names-read-as-text.json",
+      "error": null,
+      "requirement": "C00-SRC-05"
+    },
+    {
+      "path": "cases/duplicate-skill-name.json",
+      "error": "json.duplicate_key",
+      "requirement": "C00-SRC-05"
+    },
+    {
+      "path": "cases/graph-valid.json",
+      "error": null,
+      "requirement": "C00-LOCK-04"
+    },
+    {
+      "path": "cases/entrypoint-bytes-changed.json",
+      "error": "lock.digest_binding",
+      "requirement": "C00-LOCK-04"
+    },
+    {
+      "path": "cases/equal-content-different-origin.json",
+      "error": "lock.source_binding",
+      "requirement": "C00-REF-04"
+    },
+    {
+      "path": "cases/lock-duplicate-address.json",
+      "error": "lock.address_unique",
+      "requirement": "C00-LOCK-03"
+    },
+    {
+      "path": "cases/lock-dangling-edge.json",
+      "error": "lock.dangling",
+      "requirement": "C00-LOCK-03"
+    },
+    {
+      "path": "cases/lock-cycle.json",
+      "error": "lock.cycle",
+      "requirement": "C00-LOCK-03"
+    },
+    {
+      "path": "cases/lock-extra-unreachable.json",
+      "error": "lock.unreachable",
+      "requirement": "C00-LOCK-03"
+    },
+    {
+      "path": "cases/lock-missing-transitive-model.json",
+      "error": "lock.exact_closure",
+      "requirement": "C00-REF-03"
+    },
+    {
+      "path": "cases/model-interface-revision-mismatch.json",
+      "error": "lock.interface_version",
+      "requirement": "C00-LOCK-05"
+    },
+    {
+      "path": "cases/floating-lock-version.json",
+      "error": "lock.exact_version",
+      "requirement": "C00-LOCK-04"
+    },
+    {
+      "path": "cases/running-connector-without-tools-hash.json",
+      "error": "lock.connector_interface",
+      "requirement": "C00-LOCK-05"
+    },
+    {
+      "path": "cases/running-agent-without-card-digest.json",
+      "error": "lock.agent_interface",
+      "requirement": "C00-LOCK-05"
+    },
+    {
+      "path": "cases/pointer-entry-typed-as-skill.json",
+      "error": "lock.pointer_type",
+      "requirement": "C00-LOCK-05"
+    },
+    {
+      "path": "cases/local-package-escape.json",
+      "error": "reference.package_boundary",
+      "requirement": "C00-REF-01"
+    },
+    {
+      "path": "cases/missing-selected-skill.json",
+      "error": "reference.missing",
+      "requirement": "C00-REF-03"
+    },
+    {
+      "path": "cases/carried-connector-without-mcp-json.json",
+      "error": "reference.connector_entrypoint",
+      "requirement": "C00-CONN-01"
+    },
+    {
+      "path": "cases/optional-part-unresolved-left-out-of-the-lock.json",
+      "error": null,
+      "requirement": "C00-DOC-04"
+    },
+    {
+      "path": "cases/required-part-unresolved-stops-the-resolution.json",
+      "error": "reference.unresolved",
+      "requirement": "C00-DOC-03"
+    },
+    {
+      "path": "cases/local-source-version-recorded.json",
+      "error": "lock.constraint_binding",
+      "requirement": "C00-SRC-06"
+    },
+    {
+      "path": "cases/hook-folder-without-hooks-json.json",
+      "error": "reference.hook_entrypoint",
+      "requirement": "C00-HOOK-01"
+    },
+    {
+      "path": "cases/hook-lock-entry-typed-as-skill.json",
+      "error": "lock.type_binding",
+      "requirement": "C00-LOCK-04"
+    },
+    {
+      "path": "cases/definition-reuses-a-name-with-another-source-in-graph.json",
+      "error": "definition.name_in_use:skills.review",
+      "requirement": "C00-DEF-04"
+    },
+    {
+      "path": "cases/definition-points-at-a-definition.json",
+      "error": "reference.type",
+      "requirement": "C00-DEF-01"
+    },
+    {
+      "path": "cases/definition-value-for-an-undeclared-variable-in-graph.json",
+      "error": "definition.variable_undeclared:tone",
+      "requirement": "C00-VAR-05"
+    },
+    {
+      "path": "cases/definition-value-of-another-type-in-graph.json",
+      "error": "definition.variable_type:max_turns",
+      "requirement": "C00-VAR-07"
+    },
+    {
+      "path": "cases/definition-value-outside-the-allowed-values-in-graph.json",
+      "error": "definition.variable_enum:max_turns",
+      "requirement": "C00-VAR-09"
+    },
+    {
+      "path": "cases/definition-value-outside-the-range-in-graph.json",
+      "error": "definition.variable_range:max_turns",
+      "requirement": "C00-VAR-10"
+    },
+    {
+      "path": "cases/agents-entry-folder-without-agent-json.json",
+      "error": "reference.missing",
+      "requirement": "C00-PKG-01"
+    },
+    {
+      "path": "cases/selected-reference-cycle.json",
+      "error": "reference.cycle",
+      "requirement": "C00-REF-03"
+    },
+    {
+      "path": "cases/called-agent-without-description-in-graph.json",
+      "error": "reference.agent_description",
+      "requirement": "C00-CALL-05"
+    },
+    {
+      "path": "cases/agents-entry-value-for-an-undeclared-variable.json",
+      "error": "reference.variable_undeclared:tone",
+      "requirement": "C00-VAR-05"
+    },
+    {
+      "path": "cases/agents-entry-value-of-another-type.json",
+      "error": "reference.variable_type:max_turns",
+      "requirement": "C00-VAR-07"
+    },
+    {
+      "path": "cases/agents-entry-value-outside-the-allowed-values.json",
+      "error": "reference.variable_enum:max_turns",
+      "requirement": "C00-VAR-09"
+    },
+    {
+      "path": "cases/agents-entry-value-outside-the-range.json",
+      "error": "reference.variable_range:max_turns",
+      "requirement": "C00-VAR-10"
+    },
+    {
+      "path": "cases/tool-names-a-connector-the-agent-does-not-have.json",
+      "error": "document.tool_connector",
+      "requirement": "C00-CONN-03"
+    },
+    {
+      "path": "cases/tool-names-a-missing-connector-in-graph.json",
+      "error": "document.tool_connector",
+      "requirement": "C00-CONN-03"
+    },
+    {
+      "path": "cases/variable-default-used.json",
+      "error": null,
+      "requirement": "C00-VAR-03"
+    },
+    {
+      "path": "cases/variable-with-no-value-and-no-default.json",
+      "error": "variable.missing:job",
+      "requirement": "C00-VAR-04"
+    },
+    {
+      "path": "cases/value-for-a-name-the-agent-does-not-declare.json",
+      "error": "variable.undeclared:tone",
+      "requirement": "C00-VAR-05"
+    },
+    {
+      "path": "cases/value-of-another-type.json",
+      "error": "variable.type:max_turns",
+      "requirement": "C00-VAR-07"
+    },
+    {
+      "path": "cases/value-outside-the-allowed-values.json",
+      "error": "variable.enum:model",
+      "requirement": "C00-VAR-09"
+    },
+    {
+      "path": "cases/value-below-the-minimum.json",
+      "error": "variable.range:max_turns",
+      "requirement": "C00-VAR-10"
+    },
+    {
+      "path": "cases/value-inside-the-range-its-field-does-not-take.json",
+      "error": "variable.value",
+      "requirement": "C00-VAR-10"
+    },
+    {
+      "path": "cases/definition-gives-the-values.json",
+      "error": null,
+      "requirement": "C00-DEF-01"
+    },
+    {
+      "path": "cases/definition-value-for-an-undeclared-variable.json",
+      "error": "variable.undeclared:tone",
+      "requirement": "C00-VAR-05"
+    },
+    {
+      "path": "cases/definition-leaves-a-variable-with-no-default.json",
+      "error": "variable.missing:job",
+      "requirement": "C00-VAR-04"
+    },
+    {
+      "path": "cases/definition-points-at-a-document-that-is-not-an-agent.json",
+      "error": "definition.agent_type",
+      "requirement": "C00-DEF-01"
+    },
+    {
+      "path": "cases/definition-value-outside-the-allowed-values.json",
+      "error": "variable.enum:model",
+      "requirement": "C00-VAR-09"
+    },
+    {
+      "path": "cases/definition-value-outside-the-range.json",
+      "error": "variable.range:max_turns",
+      "requirement": "C00-VAR-10"
+    },
+    {
+      "path": "cases/definition-need-not-met-receiver-with-no-choice-stops.json",
+      "error": "run.not_started",
+      "requirement": "C00-DEF-03"
+    },
+    {
+      "path": "cases/definition-reuses-a-name-with-another-source.json",
+      "error": "definition.name_in_use:skills.brand-kit",
+      "requirement": "C00-DEF-04"
+    },
+    {
+      "path": "cases/definition-tool-names-a-connector-neither-has.json",
+      "error": "definition.tool_connector:mail.send",
+      "requirement": "C00-DEF-05"
+    },
+    {
+      "path": "cases/definition-that-names-a-model-is-refused.json",
+      "error": "schema:/ additionalProperties:",
+      "requirement": "C00-DEF-02"
+    },
+    {
+      "path": "cases/unchecked-need-never-given-as-met.json",
+      "error": "run.not_started",
+      "requirement": "C00-NEED-02"
+    },
+    {
+      "path": "cases/called-entry-is-a-definition.json",
+      "error": "called.type:reviewer",
+      "requirement": "C00-CALL-01"
+    },
+    {
+      "path": "cases/called-agent-without-description.json",
+      "error": "called.description:helper",
+      "requirement": "C00-CALL-05"
+    },
+    {
+      "path": "cases/called-agent-with-description.json",
+      "error": null,
+      "requirement": "C00-CALL-05"
+    },
+    {
+      "path": "cases/called-document-fails-its-schema.json",
+      "error": "schema:/ additionalProperties:",
+      "requirement": "C00-DOC-01"
+    },
+    {
+      "path": "cases/called-agent-entry-value-for-an-undeclared-variable.json",
+      "error": "variable.undeclared:tone",
+      "requirement": "C00-VAR-05"
+    },
+    {
+      "path": "cases/called-agent-entry-value-outside-the-range.json",
+      "error": "variable.range:max_turns",
+      "requirement": "C00-VAR-10"
+    },
+    {
+      "path": "cases/called-agents-unsupported-is-named.json",
+      "error": "support.required_feature:agents",
+      "requirement": "C00-DOC-03"
+    },
+    {
+      "path": "cases/required-part-unsupported-is-named.json",
+      "error": "support.required_feature:plugins",
+      "requirement": "C00-DOC-03"
+    },
+    {
+      "path": "cases/optional-part-unsupported-never-stops.json",
+      "error": null,
+      "requirement": "C00-DOC-04"
+    },
+    {
+      "path": "cases/one-required-entry-among-optional-ones-is-named.json",
+      "error": "support.required_feature:plugins",
+      "requirement": "C00-DOC-03"
+    },
+    {
+      "path": "cases/hook-that-cannot-be-run-is-named.json",
+      "error": "support.required_feature:hooks",
+      "requirement": "C00-HOOK-02"
+    },
+    {
+      "path": "cases/linked-policy-unreadable-is-named.json",
+      "error": "support.policy_unreadable:licensed-assets",
+      "requirement": "C00-POL-02"
+    }
+  ]
+}

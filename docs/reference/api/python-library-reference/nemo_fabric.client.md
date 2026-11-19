@@ -441,6 +441,56 @@ An OpenShell environment routes ``fabric-agent-ctl status`` to the owning server
 ---
 
 
+### <kbd>method</kbd> `start_agent_package`
+
+```python
+async def start_agent_package(
+    package_dir: str | os.PathLike[str],
+    config: FabricConfig,
+    *,
+    base_dir: str | os.PathLike[str] | None = None,
+    options: Mapping[str, Any] | None = None,
+    session_ref: SessionRef | None = None,
+    overrides: Mapping[str, Any] | None = None,
+    streaming: bool = False,
+) -> Runtime
+```
+
+Load an agent package and start its runtime.
+
+This is ``load_agent_package`` followed by ``start_runtime`` in one call. The package is read, checked against its lock and mapped onto ``config`` first. Nothing is started for a package that is refused or for a load that stopped.
+
+The load report is ``agent_package_report`` of the returned runtime. A load can continue past a required thing when its settings say so, and this call logs one warning that names each such thing before the start.
+
+
+
+**Args:**
+
+ - <b>`package_dir`</b>:  The package folder.
+ - <b>`config`</b>:  Complete typed ``FabricConfig`` the package is mapped onto.  ``metadata.name`` must equal the entry document's name.
+ - <b>`base_dir`</b>:  Base directory for resolving relative config paths.
+ - <b>`options`</b>:  The keyword options of ``load_agent_package`` by name,  for example ``entry``, ``variables`` and ``bindings``. These  are the members of the ``fabric-agent-ctl`` options file.
+ - <b>`session_ref`</b>:  Native session to resume. Durable sessions  require retained storage and adapter support. Omission starts fresh.
+ - <b>`overrides`</b>:  JSON-compatible overrides applied to every invocation  in the runtime unless superseded by invocation overrides.
+ - <b>`streaming`</b>:  Whether to enable collector-backed NeMo Relay ATOF  streaming for ``Runtime.invoke_stream()``.
+
+
+
+**Returns:**
+ An active ``Runtime`` that holds the load report as ``agent_package_report``. Use it as an asynchronous context manager to guarantee runtime shutdown.
+
+
+
+**Raises:**
+
+ - <b>`FabricConfigError`</b>:  With stage ``agent_package`` and a stable code  if the package is refused, if ``options`` holds a name that is  not a load option (``package_options_invalid``), or if a  required thing stopped the load  (``package_requirements_unmet``). Also if ``start_runtime``  rejects its inputs.
+ - <b>`FabricStateError`</b>:  If active, failed, and pending runtimes fill the  client's 128-record limit (``runtime_limit_reached``).
+ - <b>`FabricNativeUnavailableError`</b>:  If the native extension is not  installed.
+ - <b>`FabricRuntimeError`</b>:  If runtime startup fails.
+
+---
+
+
 ### <kbd>method</kbd> `start_runtime`
 
 ```python

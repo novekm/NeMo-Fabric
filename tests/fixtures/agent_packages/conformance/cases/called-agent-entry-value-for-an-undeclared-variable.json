@@ -1,0 +1,48 @@
+{
+  "mode": "called",
+  "caller": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+    "type": "agent",
+    "name": "lead",
+    "description": "Hand each part of a task to the agent that fits.",
+    "model": {
+      "source": "ollama::llama3.2:3b"
+    },
+    "limits": {
+      "max_turns": 30,
+      "max_parallel": 2,
+      "max_depth": 1,
+      "max_total_tokens": 600000
+    },
+    "agents": {
+      "coder": {
+        "source": "./agents/coder",
+        "variables": {
+          "tone": "formal"
+        }
+      }
+    },
+    "policies": {
+      "change-control": {
+        "source": "oci::registry.example.com/platform/policies/licensed-assets",
+        "version": "1.4.0"
+      }
+    }
+  },
+  "name": "coder",
+  "document": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+    "type": "agent",
+    "name": "coder",
+    "description": "Write or change code for one task.",
+    "limits": {
+      "max_turns": 40
+    },
+    "policies": {
+      "own-rules": {
+        "source": "oci::registry.example.com/media-team/policies/own-rules",
+        "version": "1.4.0"
+      }
+    }
+  }
+}

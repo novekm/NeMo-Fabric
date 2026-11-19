@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nvidia.github.io/oadl/schemas/0.0.1/lock.schema.json",
+  "title": "OADL 0.0.1 lock",
+  "description": "What every source of one document resolved to: the exact selected graph, rooted at $. A lock records what was selected. It is not installed state, approval or permission to run.",
+  "type": "object",
+  "required": [
+    "$schema",
+    "type",
+    "entries"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://nvidia.github.io/oadl/schemas/0.0.1/lock.schema.json",
+      "description": "The URL of the schema this document conforms to. It gives the document type and the OADL version."
+    },
+    "type": {
+      "const": "lock",
+      "description": "Document type; always lock. A lock records the selected resolved dependency graph. It does not prove installation, runtime state, approval or current authority."
+    },
+    "generator": {
+      "type": "string",
+      "description": "The tool and version that wrote the lock, e.g. oadl-examples/0.0.1"
+    },
+    "entries": {
+      "type": "array",
+      "description": "Every resolved part of the document's graph, one entry per address: the whole tree, not only the parts the document lists itself. Exactly one entry is the root, at address $",
+      "items": {
+        "$ref": "#/$defs/entry"
+      },
+      "minItems": 1,
+      "contains": {
+        "type": "object",
+        "required": [
+          "address"
+        ],
+        "properties": {
+          "address": {
+            "const": "$"
+          }
+        }
+      },
+      "maxContains": 1
+    },
+    "extensions": {
+      "$ref": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json#/$defs/extensions",
+      "description": "Data for one tool, keyed by that tool's name, so a tool can pin what it added without the specification defining it."
+    }
+  },
+  "$defs": {
+    "address": {
+      "type": "string",
+      "pattern": "^\\$(?:/(?:[^~/]|~[01])+)*$",
+      "not": {
+        "type": "string",
+        "pattern": "[\\n\\r]"
+      },
+      "description": "A lock address. $ is the root. Each following segment is a field name or the key of a named map. Within a segment ~ is written ~0 and / is written ~1."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "not": {
+        "type": "string",
+        "pattern": "\\s"
+      },
+      "description": "A SHA-256 digest: sha256: and 64 lowercase hexadecimal characters."
+    },
+    "entry": {
+      "type": "object",
+      "description": "One resolved part. Bytes (skills, plugins, carried connectors, hooks, packages, policy packages, agents) are pinned by content. Pointers (a model, a connector that is already running, an agent that is already running) are pinned by interface.",
+      "required": [
+        "address",
+        "type",
+        "source",
+        "version",
+        "dependencies"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/address",
+          "description": "The lock address of the entry: $ for the root, then a field name or the key of a named map for each segment, as in $/skills/review. A part that more than one path reaches with the same values uses the first path in sort order."
+        },
+        "type": {
+          "enum": [
+            "skill",
+            "plugin",
+            "connector",
+            "hook",
+            "package",
+            "policy",
+            "agent",
+            "agent-definition",
+            "model"
+          ],
+          "description": "The type the entry resolved to. The root of an agent's lock is an agent, and the root of a definition's lock is an agent-definition."
+        },
+        "source": {
+          "$ref": "#/$defs/source",
+          "description": "Where the entry was resolved from: how it was reached, its address, and the registry it was resolved through when there was one."
+        },
+        "version": {
+          "type": "string",
+          "description": "The version that satisfied the constraint: the Git tag or the commit for bytes from git, the exact version for packages, the declared version for a connector or an agent that is already running, the revision for a model, and the word local for a local source",
+          "minLength": 1
+        },
+        "constraint": {
+          "type": "string",
+          "description": "The version constraint as the author wrote it, e.g. ~> 1.2"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "The Git commit the version resolved to, for Git sources",
+          "not": {
+            "type": "string",
+            "pattern": "\\s"
+          }
+        },
+        "digest": {
+          "$ref": "#/$defs/sha256",
+          "description": "The digest (SHA-256) of what was fetched: the file or the tree (local and Git) or the artifact (OCI, package registries). A receiver refuses a mismatch"
+        },
+        "interface": {
+          "type": "object",
+          "description": "For pointers only: the interface pin that stands in for a digest, because a running service cannot be hashed. It pins what the pointer is, never where it is served: the platform binds the endpoint and the credentials",
+          "additionalProperties": false,
+          "properties": {
+            "declared_version": {
+              "type": "string",
+              "description": "The version the service declares about itself",
+              "minLength": 1
+            },
+            "tools_hash": {
+              "$ref": "#/$defs/sha256",
+              "description": "For a connector that is already running: a hash of the tools the server advertises, so a changed tool list shows as a change"
+            },
+            "card_digest": {
+              "$ref": "#/$defs/sha256",
+              "description": "For an agent that is already running: the digest of its Agent Card, so a changed card shows as a change"
+            }
+          },
+          "required": [
+            "declared_version"
+          ],
+          "minProperties": 1
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/address"
+          },
+          "description": "Addresses of the entries this entry depends on, so a tool can report what a changed part affects",
+          "uniqueItems": true
+        },
+        "indirect": {
+          "type": "boolean",
+          "description": "True when no document lists the entry by name, because another part brought it, such as a skill that a plugin bundles. Every indirect entry's address appears in some other entry's dependencies"
+        },
+        "retracted": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The reason the publisher gave for retracting the selected version, recorded by the tool that wrote the lock when the registry marks that version retracted. This record does not permit the use of a retracted selection; policy decides."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "properties": {
+                  "type": {
+                    "const": "pointer"
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          "then": {
+            "required": [
+              "interface"
+            ],
+            "not": {
+              "required": [
+                "digest"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "digest"
+            ],
+            "not": {
+              "required": [
+                "interface"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "properties": {
+                  "type": {
+                    "const": "git"
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          "then": {
+            "required": [
+              "commit"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "commit"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "description": "Where an entry was resolved from",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "git",
+            "oci",
+            "registry",
+            "local",
+            "pointer"
+          ],
+          "description": "How the entry was reached: git, oci (an artifact with a digest), registry, local, or pointer (a model, or a connector or an agent that is already running, recorded by revision or declared version and interface, never by endpoint)"
+        },
+        "url": {
+          "type": "string",
+          "description": "The repository, artifact or package URL. For a local source: a path that begins with ./ and is relative to the folder that holds the lock file. A pointer records no URL: the platform binds its endpoint",
+          "minLength": 1
+        },
+        "subpath": {
+          "type": "string",
+          "description": "The folder within the repository that holds the part, e.g. skills/review",
+          "minLength": 1
+        },
+        "ref": {
+          "type": "string",
+          "description": "A tag, a branch or a commit that a developer told the tool to fetch in place of the selected version, on their own machine. The commit it resolved to is still recorded. No field of a document fills it: a source carries no ref, and version is the only selector",
+          "minLength": 1
+        },
+        "registry": {
+          "type": "string",
+          "description": "The registry the entry was resolved through, e.g. pypi or npm. Every entry resolved through a registry records it, whatever its source type",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "pointer"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "url"
+                  ]
+                },
+                {
+                  "required": [
+                    "subpath"
+                  ]
+                },
+                {
+                  "required": [
+                    "ref"
+                  ]
+                }
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "url"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

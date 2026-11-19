@@ -1,0 +1,112 @@
+{
+  "mode": "graph",
+  "inventory": {
+    "root": {
+      "package": "root",
+      "path": "agent-definition.json",
+      "type": "agent-definition"
+    },
+    "packages": {
+      "root": {
+        "origin": {
+          "type": "local"
+        },
+        "files": {
+          "agent-definition.json": {
+            "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent-definition.schema.json",
+            "type": "agent-definition",
+            "name": "ada-release-notes",
+            "agent": {
+              "source": "./agent.json"
+            },
+            "description": "Release notes for the payments team.",
+            "variables": {
+              "job": "Draft release notes from the merged changes.",
+              "max_turns": 61
+            }
+          },
+          "agent.json": {
+            "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+            "type": "agent",
+            "name": "team-assistant",
+            "description": "Answer the team's questions.",
+            "instructions": {
+              "var": "job"
+            },
+            "limits": {
+              "max_turns": {
+                "var": "max_turns"
+              }
+            },
+            "variables": {
+              "job": {
+                "type": "string"
+              },
+              "max_turns": {
+                "type": "number",
+                "minimum": 5,
+                "maximum": 60,
+                "default": 20
+              }
+            },
+            "skills": {
+              "review": {
+                "source": "./parts/review"
+              }
+            }
+          },
+          "parts/review/SKILL.md": "---\nname: review\ndescription: Review a render\n---\nReport every item of the checklist that fails.\n"
+        },
+        "components": {
+          "parts/review": {
+            "type": "skill",
+            "dependencies": []
+          }
+        }
+      }
+    }
+  },
+  "lock": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/lock.schema.json",
+    "type": "lock",
+    "entries": [
+      {
+        "address": "$",
+        "type": "agent-definition",
+        "source": {
+          "type": "local",
+          "url": "./agent-definition.json"
+        },
+        "version": "local",
+        "digest": "sha256:3e6ba708ec1f9324160138813800497b6af298eb53ff85404656737487f7a939",
+        "dependencies": [
+          "$/agent"
+        ]
+      },
+      {
+        "address": "$/agent",
+        "type": "agent",
+        "source": {
+          "type": "local",
+          "url": "./agent.json"
+        },
+        "version": "local",
+        "digest": "sha256:36dbcd031819a78ab915d905f42b4977e8f18aaf7f14cd6135ae7112793d0609",
+        "dependencies": [
+          "$/agent/skills/review"
+        ]
+      },
+      {
+        "address": "$/agent/skills/review",
+        "type": "skill",
+        "source": {
+          "type": "local",
+          "url": "./parts/review"
+        },
+        "version": "local",
+        "digest": "sha256:8f89569ad30f380b1b7cef127bee2f8a45d87bf242a994973a93713055601f5a",
+        "dependencies": []
+      }
+    ]
+  }
+}

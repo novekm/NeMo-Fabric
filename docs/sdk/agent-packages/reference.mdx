@@ -1,0 +1,143 @@
+---
+title: "Reference: Report, Errors and Limits"
+description: "The load report, the error codes, the limits of the check and what the loader does not do."
+---
+{/* SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 */}
+
+## The Load Report
+
+`load_agent_package` returns an `AgentPackageReport`. Its schema is `schemas/sdk/agent-package-report.schema.json`.
+
+| Member | What it holds |
+| --- | --- |
+| `outcome` | `ready`, `stopped` or `verified_only`. |
+| `stopped_by` | The ids of the declared things that stopped the load. |
+| `entry`, `agent` | The entry document and the agent that runs: kind, name, lock address, path and digest. |
+| `lock` | The lock file: path, SHA-256, generator and entry count. |
+| `adapter` | The selected adapter, the config fields it accepts, the root extension keys its descriptor declares, and the instruction mode used. |
+| `variables` | Each variable with its value and where the value came from. |
+| `model` | The document's default model, the model that was configured, and who chose it: `caller`, `package`, `harness_default` or `not_evaluated`. |
+| `declared` | Every declared thing with its status. |
+| `digests` | Every lock entry with what was checked. |
+| `notes` | Things that did not stop the load. Each has a `code`, a `subject` and a `text`. The codes are `limit_lowered`, `local_version_ignored`, `retracted`, `entry_kept_once`, `source_not_compared`, `connector_key_not_read` and `called_agent_cannot_start`. |
+| `config`, `config_sha256` | The mapped config and a SHA-256 of it. Present when the outcome is `ready`. |
+
+A line of `declared` has an `id` made of the stating document and a JSON Pointer into it, such as `agent:/skills/release-notes` or `definition:/limits/max_turns`. It also has `kind`, `field`, `name`, `required`, `status`, `gap`, `effect`, `mapped_to`, `bound_to`, the author's `reason` and the loader's `detail`.
+
+For a thing a called agent declares, the pointer goes on below the entry that lists the called agent, such as `agent:/agents/captioner/custom_tools/spell_check`. The line's `document` is the name the called agent's document gives. The `id` follows the binding key: the key `agents.captioner.custom_tools.spell_check` names that line. To read a key back from a line, drop the stating document and write a dot for each slash:
+
+```python
+applied = {
+    item.id.split(":", 1)[1].lstrip("/").replace("/", "."): item.bound_to
+    for item in report.declared
+    if item.bound_to
+}
+```
+
+`applied` holds every binding the loader applied, key for key. A binding that was accepted and not applied, such as one for an optional agent the lock leaves out, is not in it.
+
+A line of `digests` has the lock `address`, the entry type, the source, the `version`, the `digest` with its kind, and a `result`:
+
+| Result | Meaning |
+| --- | --- |
+| `verified` | The bytes are in the package and have the pinned digest. `path` is where they were checked. |
+| `absent` | Content from git that is not in the package. Nothing is fetched. |
+| `not_verifiable` | Content pinned by an artifact digest, from an OCI registry or a package registry. The digest cannot be worked out from files, so the loader does not use the content. |
+| `pointer` | Something that is not carried: a running connector, a running agent or a model. `interface` holds its pinned version and hash. |
+| `not_checked` | An entry below a document or a part the loader did not read. |
+
+A deployment tool reads the report for three things:
+
+- **Drift.** Compare `lock.sha256`, `entry.digest`, each line of `digests` and `config_sha256` with an earlier report. The same package at the same path with the same options and config gives the same values. A path is made absolute and otherwise kept as you wrote it, so `..` segments and links are not resolved. Spell the package folder the same way each time, or `config_sha256` differs for one folder.
+- **Mounting.** Each line of `digests` gives a part's address, its digest and the folder it was verified at.
+- **Variables and model.** `variables` and `model` say what was configured.
+
+## Errors
+
+A package the loader cannot accept is refused with `FabricConfigError`. The error has `stage == "agent_package"`, a stable `code`, and `details["subject"]`, which names the file, the lock address, the variable or the option.
+
+```python
+from nemo_fabric import FabricConfigError, load_agent_package
+
+try:
+    report = load_agent_package("/sandbox/agent", config)
+except FabricConfigError as error:
+    print(error.code, error.details.get("subject"))
+```
+
+| Code | When |
+| --- | --- |
+| `package_not_found`, `package_entry_missing`, `package_lock_missing` | The folder, the entry document or the lock is not there. |
+| `package_file_unreadable`, `package_json_invalid`, `package_json_duplicate_key` | A file cannot be read, is not a JSON object, or writes a key twice. |
+| `package_document_type`, `package_schema_version`, `package_schema_invalid` | A document names no known type, names a schema or a version this release does not read, or fails its schema. |
+| `package_tool_connector_unknown` | A tool names a connector that neither the agent nor its definition has. |
+| `package_variable_reference_undeclared`, `package_variable_reference_type`, `package_variable_default_not_allowed`, `package_variable_bounds_invalid` | A variable reference or a default in the document is wrong, or a variable's `minimum` is greater than its `maximum`. |
+| `package_path_unsafe`, `package_symlink_refused`, `package_too_large` | A path leaves the package, a part holds a symbolic link, or a document or a folder is over a size bound. |
+| `package_lock_invalid` | The lock fails its schema or one of its own rules. |
+| `package_lock_digest_mismatch` | The lock file does not have the digest given in `expected_lock_sha256`. |
+| `package_lock_entry_missing`, `package_lock_entry_extra`, `package_lock_entry_mismatch` | The lock does not pin a required part, pins something the documents do not reach, or records another type, source or constraint. |
+| `package_version_not_selected` | The pinned version does not satisfy the version the document asks for. |
+| `package_digest_mismatch` | The bytes in the package do not have the pinned digest. The message gives both digests and the path. |
+| `package_part_missing`, `package_part_entrypoint` | A pinned local part is not there, or its folder lacks `SKILL.md`, `mcp.json` or `hooks.json`. |
+| `package_agent_unavailable` | The agent a definition points at is not in the package, or is pinned by an artifact digest. |
+| `package_reference_type`, `package_reference_cycle`, `package_called_agent_description` | A reference leads to the wrong type, an agent reaches itself, or a called agent has no description. |
+| `package_variable_missing`, `package_variable_undeclared`, `package_variable_type`, `package_variable_not_allowed`, `package_variable_value_invalid` | A value for a variable is missing or wrong. |
+| `package_definition_name_in_use` | A definition reuses a name the agent has, and the two entries are not identical. |
+| `package_options_invalid` | An unknown option or fact, or a value that cannot be read. Also a binding key that is not for a custom tool or a called agent, a binding below a called agent that is not bound, and a key or a target that is not one plain line of text within the size bound. For a key that breaks that rule the subject is `bindings`, and the message does not repeat the key. |
+| `package_binding_undeclared` | A binding names a custom tool or a called agent the package does not declare. |
+| `package_config_conflict` | The config sets a field the package owns to another value, or holds a called agent under a name the package lists. |
+| `package_fetch_failed` | Raised by a fetch: `git` could not be run or could not fetch, the repository does not have the pinned commit or the folder, a fetched folder holds two names that are one file on this file system, or the layout folder does not hold the pinned artifact. |
+| `package_out_dir_in_use` | Raised by a fetch: `out_dir` holds something, is inside the package folder, or cannot be made. |
+| `package_config_required`, `package_requirements_unmet` | Raised by `to_config()` when no config was given, or when the load stopped. |
+
+An error from the config itself, such as an unknown adapter, is not a package refusal. It is raised as `FabricConfigError` with the planner's message, as `Fabric.plan` raises it: it has no stage, no code and no subject.
+
+## Limits of the Check
+
+- **The lock is not signed.** The lock sits in the folder it describes. The check shows that the parts match that lock, and no more: someone who can write a part can write the lock beside it, and the load then passes. To anchor the lock, keep the `lock.sha256` of a report in a place the package cannot write, such as your registry, and pass it as `expected_lock_sha256` on later loads. A lock file with another digest is refused with `package_lock_digest_mismatch` before anything else is read. On the command bridge, put the value in the options file.
+- **The check is a load-time check.** The loader hashes the package once, when it loads. It does not watch the folder afterwards, and it is not tamper protection for the life of a runtime. Load again to check again, and compare two reports to detect drift.
+- **Optional does not cover a package that is not valid.** A part marked `"optional": true` never stops a start when it cannot be loaded or mapped here. A part that is in the package and is broken is a different case: bytes that do not match the pin, a folder without its `SKILL.md`, `mcp.json` or `hooks.json`, or a called agent with no description refuse the package, optional or not.
+- **A called agent that cannot start does not refuse its caller.** When a called agent has a variable with no value, the report has a note with the code `called_agent_cannot_start`, and the caller loads. That agent is not handed to an adapter and cannot be bound.
+- **Statuses are for the load.** A need's status says what held when the package was loaded. A runtime that is kept for many invocations loads again to get fresh statuses.
+- **Every file counts but one.** Every regular file in a pinned folder is hashed, so a stray file changes the folder's digest. A file named `.DS_Store`, which macOS Finder writes into a folder it shows, is never part of a package: the loader leaves it out of a folder's digest and does not check its bytes, and it refuses a part whose source is such a file with `package_part_missing`.
+- **A digest covers paths and bytes.** It does not cover a file's mode, and an empty folder is not seen.
+- **Only what the documents reach is checked.** A file or folder in the package that no document points at is not hashed and not reported. Mount each part from the `path` of its line in `digests`, not the whole package folder.
+- **Symbolic links are refused** on a part's path below the package root and inside a pinned folder.
+- **A local source stays inside the package folder.** A path that leaves it is refused.
+- **Size bounds.** A document is at most 4 MiB. A pinned folder holds at most 50,000 files, at most 64 levels deep and at most 1 GiB in all. On the command bridge the mapped config must fit the bridge's request limit.
+- **Paths are local.** The mapped config holds absolute paths on the machine that loaded the package. Load inside the environment the agent runs in. A load on a host cannot be used to start a runtime in a remote environment.
+
+### Windows
+
+Two things differ on Windows:
+
+- A carried connector is `not_mapped` with the gap `unsupported_platform`, because the mapped server entry starts through `/bin/sh`.
+- With `check_machine=True`, memory and storage are not probed.
+
+The `fabric-agent-ctl` command bridge does not run on Windows, so `--package` is not available there.
+
+## What Is Out of Scope
+
+The loader does not do the following. Each one is reported, never dropped.
+
+| Not done | What the report shows |
+| --- | --- |
+| Fetching, resolving or installing anything. | A git part with no bytes in the package is `absent` in `digests` and `not_mapped` in `declared`. |
+| Using content pinned by an artifact digest, unless a fetch kept its artifact in the package. | `not_verifiable` in `digests`, and `not_mapped` with the gap `content_not_verifiable`. |
+| Running called agents, running hooks, loading plugins. | The loader hands each one to an adapter that declares its key, and the harness does the rest. `mapped` says it was handed over. On another adapter the line is `not_mapped`, and the verified folder is the `path` of its line in `digests`, so your platform can wire it into the harness itself. The folder of a called agent has no lock of its own, so it cannot be loaded as a package by itself. |
+| Applying what a called agent declares, beyond its description, instructions, turn limit and skill folders. | Each such thing has a line of its own: `not_mapped`, or `could_not_be_checked` for a credential or a need. With no binding and no adapter that takes the agent, nothing below the agent is listed. |
+| Handing a running agent to a harness. | An agent with an `a2a::` source is `not_mapped`, or `could_not_be_checked` when you give a binding. |
+| Supplying or registering custom tools. | The loader keeps your `tools.definitions` entry, or the line is `bound` when you give a binding. It writes no definition, and it does not import, resolve or run a target. |
+| Writing bindings into the mapped config. | The bindings are in the report's `declared` lines only. |
+| Starting a runtime from a package in a remote environment through the SDK. | Not done. `Fabric.start_runtime_in` takes a config. Refer to [Load a Package in a Sandbox](./load-and-start.mdx#load-a-package-in-a-sandbox). |
+| Evaluating policies. | `not_mapped`. A policy is never reported as evaluated. |
+| Installing `packages`, or probing for them. | The line has the status the `packages` fact gives it, and it is `not_mapped` with no fact about its registry. The lock pin is in `digests`. |
+| Enforcing `max_parallel`, `max_depth` and `max_total_tokens`. | `not_mapped`. The line names the component that enforces the limit. |
+| Comparing a running connector or agent with its pin. | `could_not_be_checked`. |
+| Writing a model entry for the agent's default model. | The loader only selects an entry your config offers under that name. A config that holds no model has `model.source` as `not_mapped` with the gap `model_not_configured`. |
+| Reporting the model each run used. | The report says what was configured. |
+| Giving a skill a writable scratch place, or leaving files out of a digest. | Not done. A write inside a pinned folder fails the next load. |
+| Checking that a lock is the one a registry recorded, unless you pass `expected_lock_sha256`. | Not done. `lock.sha256` is in the report. |
+| Reading `extensions` or using `outputs`. | `skipped`. |
+| Checking the package again before each invocation. | Not done. Load again. |

@@ -1,0 +1,22 @@
+{
+  "mode": "compatibility",
+  "documents": [
+    {
+      "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+      "type": "agent",
+      "name": "_reviewer",
+      "description": "Review a rendered video",
+      "instructions": "Report every item that fails.",
+      "agents": {
+        "helper": {
+          "source": "./helper"
+        }
+      }
+    }
+  ],
+  "support": {
+    "features": [
+      "skills"
+    ]
+  }
+}

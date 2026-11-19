@@ -1,0 +1,7 @@
+{
+  "mode": "document",
+  "document": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+    "type": "agent"
+  }
+}

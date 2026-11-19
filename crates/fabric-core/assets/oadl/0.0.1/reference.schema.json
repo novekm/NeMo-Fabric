@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nvidia.github.io/oadl/schemas/0.0.1/reference.schema.json",
+  "title": "OADL 0.0.1 reference",
+  "description": "A pointer to a part: its source and, for anything that is not local, a version. It has no name field: the name is the key of the map entry that holds the reference. Every part is pointed at with this one shape. Everything a document declares is required unless it carries optional: true. An entry may also say what the part is for under description: text for a person, which a receiver does not act on.",
+  "type": "object",
+  "required": [
+    "source"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "source": {
+      "$ref": "#/$defs/source",
+      "description": "Where the part comes from: ./path for local, otherwise type::address such as git:: or oci::, and mcp:: or a2a:: for something that is already running."
+    },
+    "version": {
+      "$ref": "#/$defs/version",
+      "description": "The version to select, written as a version constraint: an exact version, >= and a version, or ~> and a version. Required unless the source is local. The lock records the exact selected version."
+    },
+    "optional": {
+      "$ref": "#/$defs/optional",
+      "description": "true: the agent still starts when this part cannot be loaded, and the receiver reports it. Left out, the part is required."
+    },
+    "description": {
+      "$ref": "#/$defs/description",
+      "description": "What this part is for, in a sentence, for a person who reads the document. A receiver does not act on it."
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "#/$defs/version_rule"
+    }
+  ],
+  "$defs": {
+    "version_rule": {
+      "description": "A source that is not local needs a version. Written once and used by every entry that holds a source.",
+      "if": {
+        "required": [
+          "source"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "not": {
+              "pattern": "^\\./"
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "version"
+        ]
+      }
+    },
+    "optional": {
+      "type": "boolean",
+      "default": false,
+      "description": "true marks a declared thing as optional: it never stops a start, and when it cannot be loaded or met the receiver reports it. Left out or false, the thing is required."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What a part is for, in a sentence, written for a person who reads the document. It changes nothing a receiver does: the part is resolved, pinned, loaded and reported the same with or without it. It is a member of the document like any other, so the digest of the document covers it, and the lock entry of the part does not hold it. A variable reference is never a description."
+    },
+    "fetched": {
+      "description": "A part that is carried or fetched. mcp:: and a2a:: point at something that is already running: mcp:: is a connector's source and a2a:: is a called agent's source, and neither is a source for anything else.",
+      "properties": {
+        "source": {
+          "not": {
+            "type": "string",
+            "pattern": "^(?:mcp|a2a)::"
+          }
+        }
+      }
+    },
+    "not_an_agent": {
+      "description": "A connector is never written with an a2a:: source.",
+      "properties": {
+        "source": {
+          "not": {
+            "type": "string",
+            "pattern": "^a2a::"
+          }
+        }
+      }
+    },
+    "not_a_connector": {
+      "description": "A called agent is never written with an mcp:: source.",
+      "properties": {
+        "source": {
+          "not": {
+            "type": "string",
+            "pattern": "^mcp::"
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "string",
+      "minLength": 3,
+      "pattern": "^(?:\\./|[a-z][a-z0-9_-]*::)\\S.*$",
+      "not": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "[\\n\\r\\t]"
+          },
+          {
+            "type": "string",
+            "pattern": "\\s$"
+          },
+          {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*::.*[?#]"
+          },
+          {
+            "type": "string",
+            "pattern": "^git::[^@]*/[^/@]*@[^/]*(?://.*)?$"
+          },
+          {
+            "type": "string",
+            "pattern": "^git::[a-z][a-z0-9+.-]*://[^/]+(?:/[^/]+)*/[^/@]*@[^/]*(?://.*)?$"
+          },
+          {
+            "type": "string",
+            "pattern": "^git::[^/@:]+@[^/:]+:(?:[^/]+/)*[^/@]*@[^/]*(?://.*)?$"
+          },
+          {
+            "type": "string",
+            "pattern": "^oci::.*@"
+          },
+          {
+            "type": "string",
+            "pattern": "^oci::.*:[^/]*$"
+          }
+        ]
+      },
+      "description": "Where the part comes from, as one string. ./path is local: a path relative to the document that holds the reference. Anything else is type::address, where the text before the first :: says how to reach it. git::<repository URL>//<folder> is a Git repository. oci::<registry>/<repository> is an OCI artifact. mcp::<address> is a connector that is already running, and a2a::<address> is an agent that is already running. Another type is valid in form, and a receiver that does not support it says so. An address with no type, such as a bare registry address, is not a source. A version, tag, digest or ref is not written inside the source: it goes in version. The schema refuses the forms it can see: a query string or a fragment on any type; on a git source an @ref after the repository or after the folder (a user name before the host, as in git@host:path, is not a ref); on an oci source a tag or a digest. A variable reference is never a source."
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?:(?:(?:>=|~>) ?)?[0-9]+(?:\\.[0-9]+)*(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?|[0-9a-f]{40})$",
+      "not": {
+        "type": "string",
+        "pattern": "[\\n\\r\\t]"
+      },
+      "description": "The version to select, written as a version constraint. It has one of three forms. An exact version, such as 1.2.0, selects that version and no other, compared as written: 1.2 is not 1.2.0. >= and a version, such as >= 1.4.0, selects that version or any later one. ~> and a version, such as ~> 1.2, selects that version or a later one in which only the last number written has moved: ~> 1.2 stays below 2.0, ~> 1.2.0 stays below 1.3.0, and ~> 1 stays below 2. A version is one or more numbers joined by dots; it may end with - and a pre-release part, and with + and a build part. One space may follow >= or ~>. Nothing else is a version: no other operator, no list of constraints, no leading v, no branch name, no digest and no other word. The lock records the exact selected version. Required for every source that is not local. For a git source it may instead be a full commit: 40 lowercase hexadecimal characters. The schema takes that form on any reference, because it does not see the source here; a receiver refuses it on a source that is not git. On a local source a version has no meaning. A variable reference is never a version."
+    }
+  }
+}

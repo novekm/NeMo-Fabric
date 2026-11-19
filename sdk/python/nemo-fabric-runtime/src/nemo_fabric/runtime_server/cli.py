@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
 import select
 import stat
@@ -15,6 +16,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
+from nemo_fabric import FabricConfig, FabricConfigError, load_agent_package
+from nemo_fabric.agent_package import _PACKAGE_OPTIONS
 from nemo_fabric.runtime_server import transport
 from nemo_fabric.runtime_server.protocol import (
     CONFIG_OPERATIONS,
@@ -73,6 +78,89 @@ def read_input(path: str) -> Any:
         raise ProtocolError("invalid_input") from error
 
 
+def write_report(path: str, report: dict[str, Any]) -> None:
+    """Create or replace the load report file with mode 0600."""
+    try:
+        encoded = (
+            json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2) + "\n"
+        ).encode("utf-8")
+        descriptor = os.open(
+            path,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        with os.fdopen(descriptor, "wb") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(encoded)
+    except (OSError, ValueError, TypeError, RecursionError) as error:
+        raise ProtocolError() from error
+
+
+# The report file of a refusal is not a load report, so it has its own version.
+REFUSAL_SCHEMA_VERSION = "fabric.agent_package_refusal/v1alpha1"
+
+
+def load_package_config(
+    package_dir: str,
+    config: Any,
+    *,
+    options: Any,
+    report_path: str,
+) -> dict[str, Any]:
+    """Load an agent package with the caller's config and return the mapped config.
+
+    The package is read and checked in this short-lived client process, before
+    the start request is sent. A refusal or a stop becomes ``validation_failed``
+    with the package code as its cause. No path, value or message is printed:
+    the report file carries them. The report file is always written, so nothing
+    a package declares is dropped without a word.
+    """
+    if transport.fcntl is None:
+        raise ProtocolError("platform_unsupported", "transport", unsupported=True)
+    if not isinstance(options, dict):
+        raise ProtocolError()
+    try:
+        typed_config = FabricConfig.model_validate(config)
+    except ValidationError as error:
+        raise ProtocolError("validation_failed", "validation") from error
+    socket_path = Path(os.environ.get("FABRIC_HOST_SOCKET", SOCKET_PATH))
+    try:
+        unknown = sorted(options.keys() - _PACKAGE_OPTIONS)
+        if unknown:
+            raise FabricConfigError(
+                f"{unknown[0]} is not an agent package option",
+                stage="agent_package",
+                code="package_options_invalid",
+                details={"subject": unknown[0]},
+            )
+        report = load_agent_package(
+            package_dir, typed_config, base_dir=socket_path.parent, **options
+        ).to_mapping()
+    except FabricConfigError as error:
+        write_report(
+            report_path,
+            {
+                "schema_version": REFUSAL_SCHEMA_VERSION,
+                "outcome": "refused",
+                "error": {
+                    "code": error.code,
+                    "subject": error.details.get("subject"),
+                    "message": str(error),
+                },
+            },
+        )
+        raise ProtocolError(
+            "validation_failed", "validation", cause=error.code
+        ) from error
+    mapped = report.pop("config", None)
+    write_report(report_path, report)
+    if report.get("outcome") != "ready" or not isinstance(mapped, dict):
+        raise ProtocolError(
+            "validation_failed", "validation", cause="package_requirements_unmet"
+        )
+    return mapped
+
+
 def parse_command(arguments: list[str]) -> dict[str, Any]:
     if not arguments or arguments[0] not in OPERATIONS:
         raise ProtocolError()
@@ -96,6 +184,9 @@ def parse_command(arguments: list[str]) -> dict[str, Any]:
             "--input",
             "--request",
             "--timeout-seconds",
+            "--package",
+            "--package-options",
+            "--report",
         ):
             if index + 1 == len(arguments) or (
                 flag != "--request-id" and arguments[index + 1].startswith("--")
@@ -119,7 +210,12 @@ def parse_command(arguments: list[str]) -> dict[str, Any]:
         required.add("--request-id")
     allowed = required.copy()
     if operation == "start" and "--config" in flags:
-        allowed.add("--session-ref")
+        allowed.update({"--session-ref", "--package"})
+        if "--package" in flags:
+            # The report names what was warned about, left out or refused.
+            # Stdout carries only a fixed cause, so the report is required.
+            required.add("--report")
+            allowed.update({"--package-options", "--report"})
     if operation == "check":
         allowed.add("--timeout-seconds")
         if flags.keys() & {"--agent", "--runtime-id"}:
@@ -168,6 +264,17 @@ def parse_command(arguments: list[str]) -> dict[str, Any]:
             request.update(payload)
     if "--session-ref" in flags:
         request["session_ref"] = read_input(flags["--session-ref"])
+    if "--package" in flags:
+        # Reject a request the server would reject before reading the package.
+        encode_request(request)
+        request["config"] = load_package_config(
+            flags["--package"],
+            request["config"],
+            options=read_input(flags["--package-options"])
+            if "--package-options" in flags
+            else {},
+            report_path=flags["--report"],
+        )
     if operation == "invoke":
         flag = next(iter(payload_flags))
         request[flag[2:]] = read_input(flags[flag])

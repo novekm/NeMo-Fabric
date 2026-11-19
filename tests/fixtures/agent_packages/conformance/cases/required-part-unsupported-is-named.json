@@ -1,0 +1,19 @@
+{
+  "mode": "compatibility",
+  "documents": [
+    {
+      "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+      "type": "agent",
+      "name": "_reviewer",
+      "description": "Review a rendered video",
+      "instructions": "Report every item that fails.",
+      "plugins": {
+        "remotion": {
+          "source": "oci::registry.example.com/media-team/plugins/remotion",
+          "version": "2.0.0"
+        }
+      }
+    }
+  ],
+  "support": {}
+}

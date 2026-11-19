@@ -189,6 +189,145 @@ install the CLI. NeMo Fabric owns sidecar supervision, Claude configuration,
 and upstream selection. Relay owns the gateway transport and semantic
 observability pipeline.
 
+## Run an Agent Package
+
+An [agent package](../../sdk/agent-packages.mdx) can declare plugins, hooks, and called agents. NeMo Fabric has no typed configuration field for them, so the loader writes each kind under a named root key of the configuration. The Claude descriptor declares the three keys, and the adapter passes what they hold to Claude.
+
+The following example loads a video producer package that has a `remotion` plugin, a `tool-guard` hook, and a `reviewer` agent, and starts it on Claude:
+
+```python
+from nemo_fabric import Fabric, FabricConfig, load_agent_package
+
+config = FabricConfig.from_mapping({
+    "metadata": {"name": "video-producer"},
+    "harness": {"adapter_id": "nvidia.fabric.claude"},
+    "models": {"default": {"provider": "anthropic", "model": "your-claude-model"}},
+})
+report = load_agent_package("/work/video-producer", config, base_dir="/work")
+
+runtime = await Fabric().start_runtime(report.to_config(), base_dir=report.base_dir)
+```
+
+The mapped configuration then holds the following keys. A configuration written by hand can set the same keys, with or without a package:
+
+```json
+{
+  "nemo_fabric.plugins.v1": {
+    "paths": ["/work/video-producer/plugins/remotion"]
+  },
+  "nemo_fabric.hooks.v1": {
+    "entries": [
+      {
+        "path": "/work/video-producer/hooks/tool-guard",
+        "format": "https://agent-plugins.org/schemas/1.1.0/hooks.schema.json"
+      }
+    ]
+  },
+  "nemo_fabric.agents.v1": {
+    "reviewer": {
+      "description": "Reviews a rendered video against the checklist and reports what fails.",
+      "instructions": "Look at the contact sheet and the render you are given. Report every item that fails.",
+      "max_turns": 60
+    }
+  }
+}
+```
+
+Planning rejects a key the selected adapter does not declare and a value that does not fit the adapter's schema. When the runtime starts, the adapter checks every plugin, hook, and called agent. A part the adapter cannot use fails the start with `claude_invalid_configuration` and names the part. The adapter never leaves one out silently.
+
+The adapter uses plugin folders and hook folders in place and does not copy them. The loader checks a package's files against its lock when it loads the package. A file that changes after the load is the file Claude Code reads or the adapter runs, so keep the package folder unchanged while the runtime lives.
+
+### Plugins
+
+Each path in `nemo_fabric.plugins.v1.paths` must be a folder that holds `.claude-plugin/plugin.json`, the manifest Claude Code reads. The adapter passes each folder to Claude Code as a local plugin, after the plugins it stages itself for `skills.paths` and for Relay.
+
+When a plugin is passed, the adapter approves Claude's `Skill` tool, as it does for `skills.paths`, so that Claude can use the skills the plugin carries. A `tools.enabled` or `tools.blocked` policy still applies to the tool.
+
+Claude Code loads everything the folder holds, not only skills. Review a plugin as code before you declare it:
+
+- **Commands and agents.** Claude can use the commands and the agents of the plugin. The adapter does not check them.
+- **Hooks in Claude's own format.** Claude Code runs the plugin's `hooks/hooks.json` itself. Those hooks can use a shell and any Claude event, and they run with the environment of Claude Code, which holds the model credential. They are not the hooks of `nemo_fabric.hooks.v1`, and what the Hooks section says about a handler does not hold for them.
+- **MCP servers.** The adapter starts Claude Code with strict MCP configuration, so Claude Code uses the servers of `mcp.servers` and no MCP configuration of a plugin. Declare a server the plugin needs in `mcp.servers`.
+
+The load report names the plugin and not what the plugin holds. For a plugin that comes from a package, the lock pins the bytes of the folder, so a change to any file of the plugin changes its digest.
+
+### Hooks
+
+Each entry in `nemo_fabric.hooks.v1.entries` names a hook folder and the format of its `hooks.json`. The adapter runs one format: the hooks format of the [Agent Plugins](https://agent-plugins.org/) 1.1.0 working draft. Claude Code reads hooks in a format of its own, so the adapter runs each handler itself from a Claude Agent SDK hook callback, the way the Agent Plugins format describes.
+
+The following `hooks.json` runs one handler before each tool call:
+
+```json
+{
+  "$schema": "https://agent-plugins.org/schemas/1.1.0/hooks.schema.json",
+  "hooks": {
+    "PreToolUse": [{"command": "./check-tool-call"}]
+  }
+}
+```
+
+The handler is a program in the hook folder. The following handler denies every shell command and has no opinion about any other tool call:
+
+```python
+#!/usr/bin/env python3
+import json
+import sys
+
+event = json.load(sys.stdin)
+if (event.get("tool_profile") or {}).get("name") == "shell":
+    answer = {"decision": "deny", "reason": "This agent renders through the render-queue connector."}
+    json.dump(answer, sys.stdout)
+```
+
+The adapter starts a handler as follows:
+
+- Each event starts a new process. The adapter uses no shell.
+- `command` is one token. A path that starts with `./` must be an executable file inside the hook folder. A bare name is looked up on `PATH`.
+- `args` are passed as separate arguments. The adapter replaces `${PLUGIN_ROOT}` and `${PLUGIN_DATA}` in each argument and expands nothing else.
+- The working directory is the hook folder.
+- The environment holds `PLUGIN_ROOT`, `PLUGIN_DATA`, and operating-system variables such as `PATH` and `HOME`. No variable that holds a model credential and no value from `environment.env` reaches it. A handler runs as your user and is not confined, so it can read the files that user can read.
+- `PLUGIN_ROOT` is the hook folder. `PLUGIN_DATA` is a folder for that hook under `.fabric/claude/hooks/` in the runtime's artifact root. The adapter creates the folder and does not delete it.
+- The handler reads one JSON object on standard input and writes its answer to standard output. The adapter stops a handler that runs longer than 45 seconds, together with the child processes it started.
+
+The adapter runs the following events of the format:
+
+| Event | When It Runs | What the Handler Can Answer |
+| --- | --- | --- |
+| `UserPromptSubmit` | Before Claude processes a prompt. | `additional_context`, or `deny` with a reason. Claude does not process a denied prompt. |
+| `PreToolUse` | Before a tool call. | `deny` with a reason, or `allow`. Claude does not make a denied call and receives the reason. An `allow` approves nothing. |
+| `PostToolUse` | After a tool call returns its result or fails. | `additional_context`. |
+| `Stop` | When Claude is about to finish its response. | `continue` with a reason. Claude keeps working and receives the reason. |
+
+A handler that writes nothing has no opinion.
+
+The event holds only the members the format defines. `tool_name` and `tool_input` are Claude's own values, unchanged. Before a tool call, the adapter also adds the format's portable view of the call, `tool_profile`, for the following Claude tools:
+
+| Claude Tool | `tool_profile.name` | `tool_profile.input` |
+| --- | --- | --- |
+| `Bash` | `shell` | `command` |
+| `Read` | `file.read` | `path`, from `file_path` |
+| `Write` | `file.modify` | One `write` operation on `file_path` |
+| `Edit`, `NotebookEdit` | `file.modify` | One `edit` operation on `file_path` or `notebook_path` |
+| `WebFetch` | `web.fetch` | `url` |
+| `WebSearch` | `web.search` | `queries`, with `query` as its one value |
+| An MCP tool, `mcp__<server>__<tool>` | `mcp` | `name` and `arguments` |
+
+Know these limits before you rely on a hook:
+
+- **An `allow` does not approve a tool call.** Claude takes a hook's `allow` as approval and skips its own permission check. A package must not approve its own tool calls, so the adapter passes an `allow` to Claude as no opinion. `permission_mode` and the `tools` policy decide whether the call runs. The format lets a client's own policy stand over an `allow`.
+- **A failed handler denies a tool call.** A `PreToolUse` handler that cannot start, exits with a status other than `0`, runs too long, or writes anything other than an answer the event defines denies the call. Claude receives a reason that names the hook. On the other events, a failed handler has no opinion. The adapter logs every failure.
+- **`SessionStart` fails the start.** The format also defines `SessionStart`, and the adapter has no Claude hook callback for it. A `hooks.json` that lists `SessionStart`, or an event name the format does not define, fails the start.
+- **A handler needs its executable mark.** A lock digest covers a file's bytes and not its mode. A handler file without its executable mark fails the start.
+- **`PostToolUse` has no `tool_profile`.** The handler receives Claude's `tool_name`, `tool_input`, and tool result as `tool_result`. For a tool call that failed, `tool_result` is `{"error": "<text>"}` with Claude's error text. A tool call that was interrupted does not reach the handler.
+- **An MCP tool name is Claude's spelling.** Claude writes every character of a tool name other than a letter, a digit, `_`, or `-` as `_`. For a tool with such a character, `tool_profile.input.name` differs from the name the server uses. Claude joins the server name and the tool name with `__`, and the adapter takes what follows the first `__` as the tool name. For a server whose name holds `__`, `tool_profile.input.name` starts with the rest of the server name.
+- **A relative path has no `tool_profile`.** The same holds for a `WebFetch` URL that is not an absolute `http` or `https` URL.
+
+### Called Agents
+
+Each entry in `nemo_fabric.agents.v1` becomes one Claude subagent. The key is the agent's name. A name holds lowercase letters, digits, `_` and `-`, and does not start with `-`. That is the name rule of the package format, and the descriptor refuses any other name at planning. `description` tells Claude when to call the agent, `instructions` is the agent's prompt, and `max_turns` is its turn limit when set. The adapter passes nothing else that a called agent declares, such as a model, skills, or connectors of its own.
+
+Claude starts a called agent with its `Agent` tool. When the configuration sets `tools.enabled`, list `Agent` there, or Claude cannot call any of them.
+
 ## Runtime Health
 
 `Fabric.check()` supports `live`, `active`, and `ready`. Liveness observes the owned CLI process. Active and ready require a fresh, valid `get_mcp_status()` response; reported MCP connection failures do not themselves fail readiness.

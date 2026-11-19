@@ -1,0 +1,40 @@
+{
+  "mode": "start",
+  "document": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+    "type": "agent",
+    "name": "weather",
+    "description": "Answers questions about the weather.",
+    "model": {
+      "source": {
+        "var": "model"
+      },
+      "capabilities": [
+        "tool-use"
+      ]
+    },
+    "variables": {
+      "model": {
+        "type": "string",
+        "enum": [
+          "ollama::llama3.2:3b",
+          "ollama::mistral-small3.2:24b"
+        ],
+        "default": "ollama::llama3.2:3b",
+        "description": "The model the agent starts on."
+      }
+    }
+  },
+  "values": {
+    "model": "ollama::llama3.2:1b"
+  },
+  "expect": {
+    "agent": null,
+    "refused": [
+      {
+        "id": "variable.enum:model",
+        "text": "variables.model: the value is not one of the allowed values"
+      }
+    ]
+  }
+}

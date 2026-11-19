@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What the caller chooses for one fetch. Every member may be left out.",
+  "properties": {
+    "entry": {
+      "description": "The entry document, as a path inside the package, when it is not at the root.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expected_lock_sha256": {
+      "description": "The sha256 the caller holds for the lock file, as 64 lowercase hex\ncharacters, with or without `sha256:` before them. A lock file with\nanother digest is refused before anything is fetched.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "oci_layout": {
+      "description": "A folder in the OCI image layout form that holds the artifacts the lock\npins from an OCI registry. No registry is asked: the caller fills the\nfolder with the tool they sign in with. Left out: OCI content is not\nfetched.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "AgentPackageFetchOptions",
+  "type": "object"
+}

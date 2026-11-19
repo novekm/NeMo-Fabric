@@ -1,0 +1,39 @@
+{
+  "mode": "called",
+  "caller": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+    "type": "agent",
+    "name": "lead",
+    "description": "Hand each part of a task to the agent that fits.",
+    "model": {
+      "source": "ollama::llama3.2:3b"
+    },
+    "limits": {
+      "max_turns": 30,
+      "max_parallel": 2,
+      "max_depth": 1,
+      "max_total_tokens": 600000
+    },
+    "agents": {
+      "coder": {
+        "source": "./agents/coder"
+      }
+    },
+    "policies": {
+      "change-control": {
+        "source": "oci::registry.example.com/platform/policies/licensed-assets",
+        "version": "1.4.0"
+      }
+    }
+  },
+  "name": "reviewer",
+  "document": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent-definition.schema.json",
+    "type": "agent-definition",
+    "name": "reviewer",
+    "agent": {
+      "source": "./agent.json"
+    },
+    "description": "Review one change."
+  }
+}

@@ -1,0 +1,222 @@
+---
+title: "Connectors, Plugins, Tools and Bindings"
+description: "How the loader treats connectors, plugins, hooks, called agents, custom tools, software packages and limits, and how bindings account for what your application runs."
+---
+{/* SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 */}
+
+### Connectors
+
+A connector is an MCP server. The package says where it lives by its source.
+
+**Carried in the package.** The connector's folder holds `mcp.json`, with one entry under `mcpServers` for each server: `type`, `command`, and optionally `args`, `env` and `cwd`. The loader maps each `stdio` server to an `mcp.servers` entry. The harness then starts that command when the runtime starts, so a package with a carried connector chooses a command that runs on your machine. The loader itself starts nothing. The server starts in its `cwd`, resolved inside the connector's folder. It starts in the connector's folder when `cwd` is left out or is `.`. Strings are passed as written, and nothing is expanded. The server key is the connector's name when the file has one server, and `<connector>-<server>` when it has more.
+
+The loader reads those five keys and no others. Any other key of a server entry, such as `disabled` or `timeout`, has no effect. The connector's line names each such key in its `detail`, and the report has a note with the code `connector_key_not_read`.
+
+The agent's `tools` list says which tools the agent needs. It does not narrow what a server offers, so the loader sets no allowed-tools list on the server.
+
+Whatever the command needs on the machine, such as `python3`, `node` or `uv`, is stated under `runtime.software` and checked as a runtime need. The loader installs nothing.
+
+A file the loader cannot read in that shape, or a server whose `type` is not `stdio`, makes the connector `not_mapped` with the gap `unsupported_shape`. The package is not refused for it.
+
+**Already running.** A connector with an `mcp::` source is not started and not contacted. Your config binds the endpoint and the credentials in `mcp.servers.<connector name>`. The loader keeps that entry unchanged and gives the connector the status `could_not_be_checked`, because it did not compare the running server with the version and the tools hash the lock pins. The pin is in the report's `digests` list, so your platform can compare it. With no entry in your config, the connector is `not_mapped` with the gap `not_bound`.
+
+### Plugins, Hooks and Called Agents
+
+A `FabricConfig` has no field for a plugin, a hook or an agent the model may call. The loader hands each kind to the adapter under a root key of the config, and only to an adapter whose descriptor declares that key. An adapter reads the key from the `extensions` of the config it gets.
+
+| Key | What the loader writes |
+| --- | --- |
+| `nemo_fabric.plugins.v1` | `{"paths": [...]}`: the verified folder of each plugin. |
+| `nemo_fabric.hooks.v1` | `{"entries": [{"path": ..., "format": ...}]}`: the verified folder of each hook, and the format of its handlers. The format is the `$schema` text of the hook's `hooks.json`. |
+| `nemo_fabric.agents.v1` | One entry for each called agent, by the name the agent lists it under: `description`, `instructions`, and where the adapter takes them `max_turns` and `skills.paths`. |
+
+The following example loads a video producer that has a plugin, a hook and a reviewer it may call, on an adapter that takes all three:
+
+```python
+report = load_agent_package("/sandbox/video-producer", config, base_dir="/sandbox")
+
+print(report.adapter["extensions"])
+mapped = report.to_config().to_mapping()
+print(mapped["nemo_fabric.plugins.v1"])
+# {"paths": ["/sandbox/video-producer/plugins/remotion"]}
+print(mapped["nemo_fabric.hooks.v1"])
+# {"entries": [{"path": "/sandbox/video-producer/hooks/tool-guard",
+#               "format": "https://agent-plugins.org/schemas/1.1.0/hooks.schema.json"}]}
+print(mapped["nemo_fabric.agents.v1"])
+# {"reviewer": {"description": "Reviews a rendered video against the checklist.",
+#               "instructions": "Check each item of the checklist and report what fails.",
+#               "max_turns": 60}}
+```
+
+These rules hold for all three keys:
+
+- **The adapter's descriptor decides.** An adapter takes a key when its descriptor names the key under `extension_schemas.agent_config.properties`. The loader asks that schema whether the value fits before it writes it, the way planning checks it afterwards. `report.adapter["extensions"]` lists the keys the selected adapter declares. The Claude adapter takes all three keys, and the Deep Agents adapter takes called agents. Refer to [Run an Agent Package](../../integrations/harness/claude.mdx#run-an-agent-package) and [Run the Called Agents of an Agent Package](../../integrations/harness/deepagents.mdx#run-the-called-agents-of-an-agent-package) for what each one does with them.
+- **What the adapter does not take is not written.** The line is `not_mapped` with the gap `adapter_does_not_accept`, the `detail` gives the reason, and the line follows `if_unsupported`. A thing marked `"optional": true` never stops the load.
+- **Your own values stay first.** A config that already holds a key keeps its paths, entries and agents, and the package's are added after them. A called agent under a name your config already uses is refused with `package_config_conflict`. A config that holds a key in another shape than the one above keeps its value: nothing is added, and the line is `not_mapped` with the gap `unsupported_shape`.
+- **Paths are absolute and verified.** Each path is the folder the loader checked against the lock. Load where the adapter runs.
+- **`mapped` means handed to the adapter.** It does not say that the harness loaded a plugin, or that a hook's handler ran.
+
+A hook is `not_mapped` with the gap `unsupported_shape` when its `hooks.json` is not a JSON object that names a format in `$schema`. An adapter's schema lists the formats it runs, so a hook in another format has the gap `adapter_does_not_accept`.
+
+For a called agent, the loader offers the description and the instructions first. It then offers the turn limit and each skill folder one at a time, and keeps each one the adapter's schema takes. The lines for what the agent declares follow its own line, as they do for a [bound](#bindings) agent, with `stated_by: called_agent`:
+
+- The turn limit and the skill folders the entry carries are `mapped`. One the adapter's schema does not take is `not_mapped` with the gap `adapter_does_not_accept`. A skill whose folder cannot be used has the gap it has for the agent that runs, such as `content_absent` or `unsupported_shape`.
+- The turn limit is the smallest of the agent's own `limits.max_turns`, its caller's, and the `runtime.max_turns` the mapped config holds. The line says when it was lowered and what allows that number. An agent that states no turn limit runs under its caller's, and the line `agents.<name>.limits.max_turns` is listed for it all the same.
+- The values written on a skill, `skills.<name>.variables`, reach no adapter. The line is `not_mapped` with the gap `no_fabric_field`, as it is for the agent that runs.
+- Everything else the agent declares has no place in the entry: its model, connectors, hooks, plugins, tools, custom tools, packages, policies, other limits and the agents it lists. Each is `not_mapped` with the gap `no_fabric_field`. A required one follows `if_unsupported`, and a model line is never required.
+- Its credentials and its needs are `could_not_be_checked`, because the facts of a load are about the agent that runs.
+- Nothing below a called agent that is marked `"optional": true` is required, so no such line stops a load.
+
+An agent you give a binding for is yours to run: its line is `bound` and the loader writes no entry for it. An agent with an `a2a::` source is already running, and the loader hands no running agent to a harness.
+
+An adapter takes a key by declaring it in its descriptor with a closed schema that lists only what the adapter runs. The adapter then reads the key from `config.extensions`. The following descriptor entry takes hooks in one format:
+
+```json
+"extension_schemas": {
+  "agent_config": {
+    "type": "object",
+    "properties": {
+      "nemo_fabric.hooks.v1": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {"type": "string", "minLength": 1},
+                "format": {"enum": ["https://agent-plugins.org/schemas/1.1.0/hooks.schema.json"]}
+              },
+              "required": ["path", "format"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["entries"],
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+An entry for a called agent lists `description` and `instructions`, and it lists `max_turns` and `skills` only when the adapter applies them to that agent.
+
+### Custom Tools
+
+A custom tool is a tool the application that hosts the agent implements. The document gives its name, its description and its input schema. It cannot name the code. The loader accepts the code in two ways:
+
+- **A `tools.definitions` entry in your config, under the tool's name.** This works on an adapter that accepts `tools.definitions`. The entry names code that is installed where the harness runs, in the adapter's own words. The loader keeps your entry as it is.
+- **A binding.** Your application supplies the tool outside NeMo Fabric and says so. Refer to [Bindings](#bindings).
+
+The following config supplies the video producer's `request_approval` tool on the Pi adapter, which takes a module in the workspace and the export that builds the tool:
+
+```python
+config = FabricConfig.from_mapping({
+    "metadata": {"name": "video-producer"},
+    "harness": {"adapter_id": "nvidia.fabric.pi"},
+    "tools": {"definitions": {
+        "request_approval": {"kind": "module", "ref": "tools/request_approval.ts#create"},
+    }},
+})
+report = load_agent_package("/sandbox/video-producer", config, base_dir="/sandbox")
+```
+
+The line `agent:/custom_tools/request_approval` then has the status `could_not_be_checked` and `mapped_to: tools.definitions.request_approval`. The loader did not compare your code with the description and the input schema the document gives, so the line follows `if_unverified`. A binding comes first when you give both.
+
+With neither, the line is `not_mapped` with the gap `not_bound`, and it follows `if_unsupported`. A custom tool has no `optional` member in the format, so a declared custom tool is always required.
+
+### Software Packages
+
+An agent can declare software packages it needs, each pinned by the lock to one version from a registry such as `pypi` or `npm`. The registry's own tool installs a package. The loader installs nothing. It compares the pinned version with the `packages` fact, which lists what is installed:
+
+```python
+from importlib.metadata import distributions
+
+installed = {dist.metadata["Name"]: dist.version for dist in distributions()}
+report = load_agent_package("/sandbox/video-producer", config, base_dir="/sandbox",
+                            facts={"packages": {"pypi": installed}})
+```
+
+| The `packages` fact | Status of the line |
+| --- | --- |
+| The registry lists the package at the pinned version. | `met_here` |
+| The registry lists the package at another version, or does not list it. | `not_met`. It follows `if_unsupported`. |
+| The registry lists the package with `null`: installed, version not known. | `could_not_be_checked`. It follows `if_unverified`. |
+| The fact does not name the registry, or you pass no fact. | `not_mapped` with the gap `no_fabric_field`: nothing looked for the package. It follows `if_unsupported`. |
+
+A registry you name lists every package installed from it, under the name the lock gives the registry, such as `pypi`. A package you leave out is taken as not installed. Names on PyPI compare after its normalising, so `Faster_Whisper` and `faster-whisper` are one package. A fact that lists one package under two such spellings with different versions is `could_not_be_checked`. The installed version must be the same text as the pinned version.
+
+The comparison needs no config. A load with no config gives a package the fact tells about the same status.
+
+The digest the lock holds for a package is the digest of the registry's artifact. The loader never compares it with installed files, and the line says so. The pin is in the report's `digests` list for a tool that installs the package.
+
+`check_machine` does not look for packages. Pass the fact from the environment the agent runs in. A required package that no fact tells about stops a load under the default settings.
+
+### Limits
+
+NeMo Fabric bounds one invocation of one agent. The loader maps the two limits that fit that, and reports the other three with the component that enforces each one:
+
+| Limit | What the loader does | Where it is enforced |
+| --- | --- | --- |
+| `max_turns` | Writes `runtime.max_turns`, where the adapter accepts it. | The harness, in each invocation. |
+| `timeout_seconds` | Writes `runtime.timeout_seconds`. | Each invocation is bounded by it. |
+| `max_total_tokens` | Nothing. NeMo Fabric does not count tokens across model calls. | Not here. The line names a model gateway, where every model call of the agent and of the agents it calls passes. |
+| `max_depth` | Nothing. NeMo Fabric starts no called agent. | Not here. The line names whatever starts a called agent: the harness, or a gateway in front of it. |
+| `max_parallel` | Nothing. NeMo Fabric starts no called agent. | Not here. The line names whatever starts a called agent: the harness, or a gateway in front of it. |
+
+The three lines are `not_mapped` with the gap `no_fabric_field`, and their `detail` names the component. They follow `if_unsupported`, so a package with one of them stops under the default settings. A platform that enforces them in such a component loads with `if_unsupported="warn"` and decides from the report, as [The Two Settings](./load-and-start.mdx#the-two-settings) shows. The loader hands the numbers to no component: read them from the agent document.
+
+## Bindings
+
+A custom tool is a tool the application that hosts the agent implements. A called agent is an agent the model may call by name. An application that supplies a custom tool itself, or runs a called agent itself, says so with `bindings`. A binding names your own target for one declared thing:
+
+```python
+from nemo_fabric import Fabric, load_agent_package
+
+bindings = {
+    "custom_tools.request_approval": "my_app.tools:request_approval",
+    "agents.captioner": "my_app.agents:captioner",
+    "agents.captioner.custom_tools.spell_check": "my_app.tools:spell_check",
+}
+report = load_agent_package(package_dir, config, base_dir=base_dir, bindings=bindings)
+
+config = report.to_config()
+targets = {item.id: item.bound_to for item in report.declared if item.bound_to}
+runtime = await Fabric().start_runtime(config, base_dir=report.base_dir)
+```
+
+A key is the place of the declared thing:
+
+| Key | Names |
+| --- | --- |
+| `custom_tools.<name>` | A custom tool of the agent that runs. |
+| `agents.<name>` | An agent the agent that runs calls. |
+| `agents.<name>.custom_tools.<tool>` | A custom tool of that called agent. |
+| `agents.<name>.agents.<other>` | An agent that called agent calls. The same pattern goes on at every depth. |
+
+A key is the same whether the agent or its definition states the thing. A value is one line of text, from 1 to 1024 bytes. It can be a Python reference, a registered name, or any text your application reads. The loader keeps it as you wrote it. A key or a value with a control character, a line or paragraph separator, or a format character that hides text or reverses its direction is refused, and so is a key over 1024 bytes.
+
+A binding is data. The loader never imports, resolves or runs a target, and it does not check that the target exists. Your application does that when it starts the agent. The report holds each target as you wrote it, so do not put a credential in one.
+
+The loader looks at bindings after it has checked the documents, the lock and every pin, and before it applies the two settings. These rules hold:
+
+- **A bound thing is accounted for.** Its line has the status `bound` and your target in `bound_to`, and it does not stop the load. The loader writes nothing into the config for it. With no binding, a custom tool needs a `tools.definitions` entry, and a called agent needs an adapter that takes called agents. With neither, the line is `not_mapped`, and a required one stops a load under `if_unsupported="stop"`. When you give bindings, the `detail` of such a line names the key to add. A load with no bindings has an empty `bound_to` on every line.
+- **A binding for a called agent accounts for running it, not for its content.** The agent's document is still read, checked against its schema and compared with the lock. A document that changed after the lock was written refuses the package with `package_digest_mismatch`, with or without a binding.
+- **A called agent you run brings its own things.** When you bind `agents.<name>`, your target is that agent with the name, description and instructions its document gives. The report then lists everything else the document declares, each thing on a line of its own. The custom tools it declares and the agents it lists each need a binding of their own.
+- **A binding for a called agent accounts for nothing else it declares.** NeMo Fabric configures one agent, so it applies nothing a called agent declares. The agent's skills, the values written on a skill, plugins, connectors, hooks, tools, packages, policies and limits are `not_mapped` with the gap `no_fabric_field`, and they follow `if_unsupported`. Its credentials, its runtime needs and its needs from the model are `could_not_be_checked`, because the loader has no fact about where you run that agent, and they follow `if_unverified`. Its default model, its model settings, its outputs and its extensions are reported and never required. So a called agent that requires any of these stops a strict load, and the line names the thing. With no binding for the agent, on an adapter that takes no called agents, nothing below it is listed and the agent's own line stops the load.
+- **A binding below a called agent needs that agent's binding.** A key such as `agents.captioner.custom_tools.spell_check` is refused with `package_options_invalid` unless `agents.captioner` is bound too.
+- **A key that names nothing the package declares is refused** with `package_binding_undeclared`. The subject is `bindings.<key>`.
+- **A called agent with no document in the package is not bound.** For an agent pinned from git whose content is not in the package, the line stays `not_mapped` with the gap `content_absent`, and the `detail` says the binding was not applied. An agent pinned by an artifact digest has the gap `content_not_verifiable`. A called agent that could not be started is not bound either: its line stays `not_mapped`, and a note says why it could not start.
+- **A running agent follows the rule for a running connector.** An agent with an `a2a::` source and a binding has the status `could_not_be_checked` and your target in `bound_to`, because nothing compared it with the version and the card the lock pins. It follows `if_unverified`.
+- **A binding changes nothing else.** It applies to custom tools and called agents only. A key for anything else, such as a hook, a policy or a need, is refused with `package_options_invalid`. No binding gives another line a better status: no need, pin, limit or policy is accounted for by one.
+- **A timeout bounds one NeMo Fabric invocation.** With no called agent bound, one invocation is the whole tree, and the `limits.timeout_seconds` line says so. After you bind a called agent, the line says that a run of that agent outside the invocation is yours to bound.
+- **An optional called agent needs no binding.** It never stops a load, and neither does anything it declares: no line below it is required, with or without a binding. A custom tool has no `optional` member in the format, so a custom tool of the agent that runs is always required.
+
+The bindings are carried in the report. The loader writes them into no config field.
+
+So `report.to_config()` and `report.base_dir` start the runtime, and the lines of `report.declared` with a `bound_to` are the mapping your application wires up. To hand the mapping to your own adapter, put it in the config you pass to the loader, in a field your adapter's descriptor declares. The loader keeps every field of your config that the package does not set.
+
+A load with no config checks the bindings and evaluates nothing: the lines are listed with the status `not_evaluated`.

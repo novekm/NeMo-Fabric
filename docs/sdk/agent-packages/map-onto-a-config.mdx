@@ -1,0 +1,148 @@
+---
+title: "Map a Package Onto a Config"
+description: "How each field of an agent maps onto a FabricConfig: the field table, the caller's config, the model and skills."
+---
+{/* SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 */}
+
+## What Mapped Means
+
+A declared thing has the status `mapped` when the loader wrote it into the config and that config planned on the selected adapter. It does not show that the harness loaded or used it. The adapter's own result is the evidence for that.
+
+The loader reads what the selected adapter accepts from the adapter's descriptor when the package is loaded. Refer to the [configuration compatibility table](../configure-agents.mdx#normalized-configuration-compatibility) for what each adapter accepts.
+
+Nothing a package declares is dropped silently. Each declared thing is one line in the report's `declared` list with one of these statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `mapped` | Written into the config, and the config planned. |
+| `not_mapped` | Not written. The line's `gap` says why. |
+| `bound` | A custom tool or a called agent you gave a binding for. The line's `bound_to` is your target. Nothing was written into the config. |
+| `could_not_be_checked` | The loader cannot tell whether it holds. |
+| `skipped` | Data the loader does not use, such as `extensions`. |
+| `not_evaluated` | No config was given, so nothing was mapped. |
+| `met_here`, `met_remotely`, `not_met` | The status of a runtime need, or of a software package. |
+
+## How Fields Map
+
+The agent meant here is the agent that runs: its variables filled in, and read together with its definition when there is one.
+
+| Document field | Goes to | When it is not mapped |
+| --- | --- | --- |
+| `name` | `metadata.name`. It must equal the config's. | Always mapped. |
+| `description` | `metadata.description` | Always mapped. |
+| `instructions` | `instructions.system.content` | Follows `if_unsupported` when the adapter does not accept system instructions. |
+| `model.source` | `models.default`, when the config sets no default model and offers one under that name. A config that sets `models["default"]`, or holds one model under another name, keeps it. | Reported only. Refer to [The Model](#the-model). |
+| `model.parameters.temperature` | The `temperature` of the model the config selects, where the config leaves the setting unset. | Reported only. |
+| `model.parameters.max_output_tokens` | The `max_tokens` of the model the config selects, where the config leaves the setting unset. | Reported only. |
+| `model.revision`, `model.parameters.effort` | Nothing. | Reported only. |
+| `model.capabilities`, `model.min_context_tokens` | A runtime need. | Status from the `model` fact. |
+| `limits.max_turns` | `runtime.max_turns` | Follows `if_unsupported` when the adapter does not accept it, or when the number is above 4294967295. |
+| `limits.timeout_seconds` | `runtime.timeout_seconds`. It bounds each invocation. A called agent you bind and run outside the invocation is yours to bound, and the line's `detail` says so. | Follows `if_unsupported` when the number is too large to hold as a duration. |
+| `limits.max_parallel`, `limits.max_depth`, `limits.max_total_tokens` | Nothing. NeMo Fabric cannot enforce them, and the line names the component that does. | Follows `if_unsupported`. Refer to [Limits](./parts-and-bindings.mdx#limits). |
+| `skills.<name>` | One `skills.paths` entry, or one `skill` entry of `skills.directories` when the config sets that field: the verified folder. | Follows `if_unsupported`. Refer to [Skills](#skills). |
+| `skills.<name>.variables` | Nothing. | Follows `if_unsupported`. |
+| `connectors.<name>`, carried in the package | `mcp.servers.<key>` as a stdio server. | Follows `if_unsupported`. |
+| `connectors.<name>`, already running | The config's own `mcp.servers.<name>` entry. | Follows `if_unverified` when the config has the entry. Follows `if_unsupported` when it does not. |
+| `tools`, a connector tool | Nothing. The tool comes with its server. | Follows `if_unverified` when the connector is mapped. Otherwise follows `if_unsupported`. |
+| `tools`, a built-in tool | Nothing. The harness keeps its default tools. | Follows `if_unverified`. |
+| `plugins.<name>` | One path under the root key `nemo_fabric.plugins.v1`: the verified folder. | Follows `if_unsupported` when the adapter does not declare the key. Refer to [Plugins, Hooks and Called Agents](./parts-and-bindings.mdx#plugins-hooks-and-called-agents). |
+| `hooks.<name>` | One entry under the root key `nemo_fabric.hooks.v1`: the verified folder and the format of its handlers. | Follows `if_unsupported` when the adapter does not declare the key or does not run that format. |
+| `agents.<name>` | One entry under the root key `nemo_fabric.agents.v1`. With a binding the line is `bound` and nothing is written. | Follows `if_unsupported` when it has no binding and the adapter does not declare the key. |
+| `custom_tools.<name>` | Nothing. The config's own `tools.definitions.<name>` entry is kept. With a binding the line is `bound`. | Follows `if_unverified` when the config has the entry. Follows `if_unsupported` when it has neither the entry nor a binding. Refer to [Custom Tools](./parts-and-bindings.mdx#custom-tools). |
+| `policies.<name>` | Nothing. | Follows `if_unsupported` on every adapter. |
+| `packages.<name>` | Nothing. NeMo Fabric installs no package. The pinned version is compared with the `packages` fact. | Follows `if_unsupported` when the package is not installed at the pinned version, or when no fact tells about its registry. Follows `if_unverified` when the installed version is not known. Refer to [Software Packages](./parts-and-bindings.mdx#software-packages). |
+| `credentials` | Nothing. The platform binds them. | Follows `if_unverified`. |
+| `runtime.compute`, `runtime.software`, `runtime.network`, `runtime.harness` | A runtime need. | Refer to [Runtime Needs](./runtime-needs.mdx#runtime-needs). |
+| `outputs`, `extensions` | Nothing. | `skipped`. Reported only. |
+
+"Follows `if_unsupported`" and "follows `if_unverified`" mean the setting decides whether a required thing stops the load. A thing marked `"optional": true` in the document never stops a load. "Reported only" means the line has `required: false` and never stops a load.
+
+### The Caller's Config
+
+The config you pass is a complete `FabricConfig`. The loader keeps everything the package has no field for: `harness`, `workflow`, `discovery`, `environment`, `tools`, `telemetry`, `relay`, `provenance`, `system_stats`, and the runtime settings for state and artifacts. For a field the package owns, these rules apply:
+
+| Config field | Rule |
+| --- | --- |
+| `metadata.name` | Must equal the entry document's name. |
+| `metadata.description` | Filled from the documents. A different value in the config is refused. |
+| `instructions.system` | Must be absent when the agent has instructions. Kept when the agent has none. |
+| `models["default"]` | Your model choice. Kept as given. |
+| `models.<name>`, with no default | A model you offer under a name. The entry named like the agent's `model.source` moves to `models["default"]`. The other entries are kept. |
+| `runtime.max_turns`, `runtime.timeout_seconds` | Allowed. The smaller of the two numbers applies, and the report notes it. |
+| `skills.paths` | Kept. The package's skill folders are added after them, unless the config sets `skills.directories`. |
+| `skills.directories` | Kept. When the config sets it, even as an empty list, the package's skill folders are added after its entries as `skill` entries. |
+| `skills.bundled`, `skills.duplicates` | Kept as given. |
+| `mcp.servers.<name>` | Binds the running connector of that name. Other names are your own servers and are kept. |
+| `tools.definitions.<name>` | Supplies the custom tool of that name. Other names are your own tools and are kept. |
+| `nemo_fabric.plugins.v1`, `nemo_fabric.hooks.v1` | Kept. The package's plugin folders and hooks are added after yours. |
+| `nemo_fabric.agents.v1` | Kept. The package's called agents are added. A name you already use is refused. |
+
+A config that sets a field the package owns to another value is refused with `package_config_conflict`.
+
+The `instruction_mode` option says how the agent's instructions meet the harness's own default instructions. With `replace` they take the place of the harness default. With `append` the harness default is kept and the agent's instructions follow it. Left out, the loader uses `replace` when the selected adapter offers it, and `append` otherwise. A mode the adapter does not offer follows `if_unsupported`. The option does not add text of your own: a config cannot set `instructions.system` beside a package that has instructions. To add platform text today, write a definition that points at the agent and adds instructions: its text follows the agent's. A definition has its own lock.
+
+### The Model
+
+An agent names its default model in `model.source`, for example `ollama::mistral-small3.2:24b`. Your config says which models there are. The loader puts the two together in one of three ways.
+
+**Your config sets `models["default"]`.** That is the model. The loader changes nothing, and the report has `model.origin: caller`.
+
+**Your config sets no default and offers models by name.** Name each `models` entry with the text an agent gives as its `model.source`. The loader moves the entry whose name is exactly the agent's `model.source`, after variables, to `models["default"]`. The report has `model.origin: package`, and the line `agent:/model/source` is `mapped` to `models.default`. Every other entry stays as you wrote it.
+
+```python
+config = FabricConfig.from_mapping({
+    "metadata": {"name": "video-producer"},
+    "harness": {"adapter_id": "nvidia.fabric.hermes"},
+    "models": {
+        "ollama::mistral-small3.2:24b": {"provider": "openai", "model": "mistral-small3.2:24b",
+                                         "base_url": "http://127.0.0.1:11434/v1"},
+        "ollama::llama3.2:3b": {"provider": "openai", "model": "llama3.2:3b",
+                                "base_url": "http://127.0.0.1:11434/v1"},
+    },
+})
+report = load_agent_package("/sandbox/video-producer", config, base_dir="/sandbox")
+assert report.model["origin"] == "package"
+```
+
+One config then serves agents that declare different models, and a definition that sets the model through a variable selects its own. The name must match exactly. The loader does not compare a provider's model name with the document's text.
+
+**Your config holds one model under another name.** That model is your choice: planning and the adapters run the only model of a config that sets no default. The entry stays where it is, the `model.source` line is `skipped`, and the report has `model.origin: caller` with the model's name.
+
+**Your config holds no model.** No model is written. The line is `not_mapped` with the gap `model_not_configured`. The report has `model.origin: harness_default` and no model name. The harness then uses its own default when it has one. An adapter that needs a model in the config, such as Hermes, fails at start.
+
+A config that holds more than one model, sets no default and names none after the document's model does not plan, and that error is returned as it is.
+
+The loader writes no model entry of its own. In the document, the text before `::` in `model.source` names a catalog, such as `ollama` or `hf`. A catalog is not a NeMo Fabric provider: a provider also needs an endpoint and a key, and only your config has those. The report gives the document's default in `model.declared_source`.
+
+Neither the document's default model nor its settings ever stop a load. A setting under `model.parameters` is written into the model the config selects, yours or the one the loader moved to the default, and only where the entry leaves that setting unset.
+
+With no config, the report has `model.origin: not_evaluated`.
+
+The report says which model was configured. It does not say which model a run used.
+
+### Skills
+
+Each skill folder in the package becomes one entry in the `skills` section of the config. The entry points at the verified folder. Your config chooses the form of the entry, because `skills.paths` and `skills.directories` cannot be combined:
+
+| Your config | Where a skill folder goes |
+| --- | --- |
+| Does not set `skills.directories` | One `skills.paths` entry, added after your paths. |
+| Sets `skills.directories`, even as an empty list | One `skill` entry of `skills.directories`, added after your entries. Nothing is added to `skills.paths`. |
+
+The loader never changes the form your config uses. Every adapter that accepts skills takes `skills.paths`, and `skills.directories` works only with the adapters that support it. Refer to [Configure Skills](../../integrations/harness/skills.mdx) for the two forms and for the adapters that support `skills.directories`.
+
+The adapters take a skill as a folder that holds `SKILL.md`. Deep Agents is the exception: it reads each `skills.paths` entry as a folder that holds skill folders, so it finds no skill in the folder of one package skill. The line is `mapped` all the same, because the status says that the config planned on the adapter, not that the harness loaded the skill. The following rules apply to both forms:
+
+- A skill that is one file is valid in the format and is not mapped. Its line has the gap `unsupported_shape`.
+- A folder name maps once. When two skills sit in folders with the same name, or two entries point at one folder, the first is mapped and the others have the gap `key_clash`. The skill folders already in your config take their names first: each `skills.paths` entry, or each `skill` entry of `skills.directories`. The loader does not look inside a `folder` entry.
+
+One more rule applies when your config sets `skills.directories`. Planning refuses an entry kind that the selected adapter does not list under `skills.directory_loading` in its descriptor. When the adapter does not list `skill` entries, the loader writes no entry: the skill is `not_mapped` with the gap `adapter_does_not_accept`, and it follows `if_unsupported`.
+
+The loader leaves `skills.bundled` and `skills.duplicates` as your config sets them. The adapter applies a `skills.duplicates` policy at start to every `skills.directories` entry, yours and the package's alike.
+
+The key a skill has in the document is not passed on. An adapter names a skill by the `name` in its `SKILL.md` front matter or by its folder, as its adapter guide describes. When the key differs from the folder's name, the line's `detail` gives the folder's name.
+
+A package lists single skills. A folder of skills that the harness searches, or a folder the agent can change, is a `folder` entry of `skills.directories` in your config. The loader keeps your entries and adds no `folder` entry.
+
+A skill's content is pinned. Mount it read-only or read-write as your platform decides, but any write changes the digest, and the next load refuses the package with `package_digest_mismatch`. A skill that needs a place to write gets one outside its pinned folder. The loader cannot leave a scratch file out of a digest.

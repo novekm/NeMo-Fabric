@@ -1,0 +1,35 @@
+{
+  "mode": "run",
+  "document": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+    "type": "agent",
+    "name": "example",
+    "runtime": {
+      "compute": {
+        "memory": "16gb",
+        "gpu": {
+          "interface": {
+            "cuda": {
+              "version": ">= 12.0",
+              "compute_capability": ">= 7.0"
+            }
+          },
+          "memory": "6gb",
+          "optional": true
+        },
+        "reason": "Rendering holds every frame in memory. Transcription is faster on a CUDA GPU."
+      }
+    }
+  },
+  "facts": {},
+  "on_unmet": "warn",
+  "on_unchecked": "stop",
+  "expect": {
+    "statuses": {
+      "runtime.compute.memory": "could not be checked"
+    },
+    "required_not_checked": [
+      "runtime.compute.memory"
+    ]
+  }
+}

@@ -19,6 +19,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from nemo_fabric._collector_client import _AtofCollectorClient
+from nemo_fabric.agent_package import AgentPackageReport
 from nemo_fabric.errors import (
     FabricCapabilityError,
     FabricConfigError,
@@ -121,6 +122,7 @@ class Runtime:
         self._stream_finalizers_finished: set[str] = set()
         self._stream_cleanup_failed: set[str] = set()
         self._closing = False
+        self._agent_package_report: AgentPackageReport | None = None
 
     @property
     def status(self) -> RuntimeStatus:
@@ -165,6 +167,12 @@ class Runtime:
             ErrorInfo.from_mapping(value)
             for value in self._runtime.get("recovery_warnings", ())
         )
+
+    @property
+    def agent_package_report(self) -> AgentPackageReport | None:
+        """Return the load report of ``Fabric.start_agent_package()``, or None."""
+
+        return self._agent_package_report
 
     @property
     def supports_streaming(self) -> bool:

@@ -10,9 +10,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use nemo_fabric_core::{
-    AdapterDescriptor, AdapterTargetDescriptor, EnvironmentHandle, EnvironmentReference,
-    FabricConfig, FabricError, OpenAiStreamTransport, ResolveContext, RunPlan, RunRequest,
-    RuntimeHandle, ServiceHandle, ServiceReference, doctor_plan, inspect_adapter_config,
+    AdapterDescriptor, AdapterTargetDescriptor, AgentPackageFetchOptions, AgentPackageOptions,
+    EnvironmentHandle, EnvironmentReference, FabricConfig, FabricError, OpenAiStreamTransport,
+    ResolveContext, RunPlan, RunRequest, RuntimeHandle, ServiceHandle, ServiceReference,
+    doctor_plan, inspect_adapter_config, load_agent_package_with_adapter_directories,
     resolve_diagnostic_plan_from_config_with_adapter_directories,
     resolve_run_plan_from_config_with_adapter_directories, run_plan,
 };
@@ -66,6 +67,96 @@ fn plan_config(py: Python<'_>, config_json: String, base_dir: Option<String>) ->
         })
         .map_err(to_py_error)?;
     to_json(&plan)
+}
+
+/// Read, check and map one agent package and return the load report as JSON.
+///
+/// `config_json` is the caller's complete config, or `None` to verify and
+/// report only. `options_json` is one JSON object with the load options.
+#[pyfunction]
+#[pyo3(signature = (package_dir, config_json, options_json, base_dir=None))]
+fn load_agent_package(
+    py: Python<'_>,
+    package_dir: String,
+    config_json: Option<String>,
+    options_json: String,
+    base_dir: Option<String>,
+) -> PyResult<String> {
+    let config = config_json.map(parse_config).transpose()?;
+    let options: AgentPackageOptions = parse_package_options(&options_json)?;
+    let (context, adapter_directories) = resolve_context(py, base_dir)?;
+    let report = py
+        .detach(|| {
+            load_agent_package_with_adapter_directories(
+                Path::new(&package_dir),
+                config,
+                options,
+                context,
+                &adapter_directories,
+            )
+        })
+        .map_err(to_py_error)?;
+    to_json(&report)
+}
+
+fn parse_package_options<T: serde::de::DeserializeOwned>(options_json: &str) -> PyResult<T> {
+    serde_json::from_str(options_json).map_err(|error| {
+        to_py_error(FabricError::AgentPackage {
+            code: "package_options_invalid".to_string(),
+            subject: "options".to_string(),
+            message: error.to_string(),
+        })
+    })
+}
+
+/// Fetch the content the lock of an agent package pins and return the fetch report as JSON.
+///
+/// `options_json` is one JSON object with the fetch options.
+#[pyfunction]
+fn fetch_agent_package(
+    py: Python<'_>,
+    package_dir: String,
+    out_dir: String,
+    options_json: String,
+) -> PyResult<String> {
+    let options = parse_package_options::<AgentPackageFetchOptions>(&options_json)?;
+    let report = py
+        .detach(|| {
+            nemo_fabric_core::fetch_agent_package(
+                Path::new(&package_dir),
+                Path::new(&out_dir),
+                options,
+            )
+        })
+        .map_err(to_py_error)?;
+    to_json(&report)
+}
+
+/// Fetch an agent package that is a folder in a git repository, complete it from its own
+/// lock, and return the fetch report as JSON.
+///
+/// `source` is `git::<repository>//<folder>` and `git_ref` is a tag, a branch or a full
+/// commit. `options_json` is one JSON object with the fetch options.
+#[pyfunction]
+fn fetch_agent_package_from_git(
+    py: Python<'_>,
+    source: String,
+    git_ref: String,
+    out_dir: String,
+    options_json: String,
+) -> PyResult<String> {
+    let options = parse_package_options::<AgentPackageFetchOptions>(&options_json)?;
+    let report = py
+        .detach(|| {
+            nemo_fabric_core::fetch_agent_package_from_git(
+                &source,
+                &git_ref,
+                Path::new(&out_dir),
+                options,
+            )
+        })
+        .map_err(to_py_error)?;
+    to_json(&report)
 }
 
 /// Inspect supplied host metadata without probing executable adapter locations.
@@ -551,6 +642,9 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(finalize_run_result, m)?)?;
     m.add_function(wrap_pyfunction!(plan_config, m)?)?;
+    m.add_function(wrap_pyfunction!(load_agent_package, m)?)?;
+    m.add_function(wrap_pyfunction!(fetch_agent_package, m)?)?;
+    m.add_function(wrap_pyfunction!(fetch_agent_package_from_git, m)?)?;
     m.add_function(wrap_pyfunction!(inspect_adapter_metadata, m)?)?;
     m.add_function(wrap_pyfunction!(doctor_config, m)?)?;
     m.add_function(wrap_pyfunction!(run_config, m)?)?;
@@ -619,6 +713,19 @@ fn to_py_error(error: nemo_fabric_core::FabricError) -> PyErr {
                     _ => timeout,
                 }
             })
+        }
+        FabricError::AgentPackage { code, subject, .. } => {
+            // Keep the stable refusal code and the thing it names for the SDK.
+            let py_error = PyRuntimeError::new_err(error.to_string());
+            match Python::attach(|py| -> PyResult<()> {
+                py_error.value(py).setattr("code", code)?;
+                let details = pyo3::types::PyDict::new(py);
+                details.set_item("subject", subject)?;
+                py_error.value(py).setattr("details", details)
+            }) {
+                Ok(()) => py_error,
+                Err(setattr_error) => setattr_error,
+            }
         }
         FabricError::ResourceObservationUnavailable { .. } => {
             ResourceObservationUnavailableError::new_err(error.to_string())

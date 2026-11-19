@@ -259,6 +259,61 @@ def test_claude_descriptor_is_narrow_and_versioned():
             "additionalProperties": False,
         },
         "extension_schemas": {
+            "agent_config": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                    "nemo_fabric.plugins.v1": {
+                        "type": "object",
+                        "properties": {
+                            "paths": {
+                                "type": "array",
+                                "items": {"type": "string", "minLength": 1},
+                            },
+                        },
+                        "required": ["paths"],
+                        "additionalProperties": False,
+                    },
+                    "nemo_fabric.hooks.v1": {
+                        "type": "object",
+                        "properties": {
+                            "entries": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "path": {"type": "string", "minLength": 1},
+                                        "format": {
+                                            "enum": [
+                                                "https://agent-plugins.org/schemas/1.1.0/hooks.schema.json"
+                                            ]
+                                        },
+                                    },
+                                    "required": ["path", "format"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": ["entries"],
+                        "additionalProperties": False,
+                    },
+                    "nemo_fabric.agents.v1": {
+                        "type": "object",
+                        "propertyNames": {"pattern": "^[a-z0-9_][a-z0-9_-]*$"},
+                        "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                                "description": {"type": "string", "minLength": 1},
+                                "instructions": {"type": "string", "minLength": 1},
+                                "max_turns": {"type": "integer", "minimum": 1},
+                            },
+                            "required": ["description", "instructions"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "additionalProperties": False,
+            },
             "usage": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",

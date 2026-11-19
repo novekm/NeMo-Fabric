@@ -1,0 +1,24 @@
+{
+  "mode": "run",
+  "document": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+    "type": "agent",
+    "name": "example",
+    "instructions": "Answer the question.",
+    "runtime": {
+      "compute": {
+        "memory": "8gb"
+      }
+    }
+  },
+  "facts": {
+    "memory": "16gb"
+  },
+  "on_unmet": "warn",
+  "expect": {
+    "statuses": {
+      "runtime.compute.memory": "met here"
+    },
+    "starts": true
+  }
+}

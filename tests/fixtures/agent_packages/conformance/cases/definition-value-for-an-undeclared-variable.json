@@ -1,0 +1,52 @@
+{
+  "mode": "definition",
+  "definition": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent-definition.schema.json",
+    "type": "agent-definition",
+    "name": "weekly-report",
+    "agent": {
+      "source": "./agent.json"
+    },
+    "description": "The weekly report.",
+    "variables": {
+      "job": "Summarize the week.",
+      "max_turns": 8,
+      "tone": "formal"
+    }
+  },
+  "agent": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+    "type": "agent",
+    "name": "reporter",
+    "instructions": {
+      "var": "job"
+    },
+    "model": {
+      "source": {
+        "var": "model"
+      }
+    },
+    "limits": {
+      "max_turns": {
+        "var": "max_turns"
+      }
+    },
+    "variables": {
+      "job": {
+        "type": "string"
+      },
+      "model": {
+        "type": "string",
+        "default": "ollama::llama3.2:3b"
+      },
+      "max_turns": {
+        "type": "number",
+        "default": 20,
+        "description": "Most model turns one run may take."
+      }
+    }
+  },
+  "expect": {
+    "agent": null
+  }
+}

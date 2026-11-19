@@ -1,0 +1,64 @@
+---
+title: "Agent Packages"
+description: "Load an agent package with NVIDIA NeMo Fabric: check it against its lock, map it onto a FabricConfig, and start it."
+---
+{/* SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 */}
+
+An agent package is a folder that describes one agent: a JSON document, a lock file that pins every part by digest, and the parts in folders beside it. The format is [OADL](https://github.com/NVIDIA/oadl), the Open Agentic Declarative Language, a portable format for agents and what they depend on.
+
+NVIDIA NeMo Fabric reads a package, checks every part against the lock, maps the agent onto a `FabricConfig`, and starts it on a harness adapter. A load report says what happened to each thing the agent declares. Loading needs no network and no tool outside NeMo Fabric.
+
+## Quickstart
+
+The [agent package example](https://github.com/NVIDIA/NeMo-Fabric/tree/main/examples/agent_package) holds a complete package. Build NeMo Fabric as the [install guide](../getting-started/install.mdx) describes, then run this from the repository root. It needs no model endpoint:
+
+```bash
+.venv/bin/python -m examples.agent_package
+```
+
+The report has `outcome: verified_only`, and one line in `digests` for each part of the lock with the result `verified`.
+
+To start the agent, pass the package folder and a complete `FabricConfig`. The config holds what the package has no field for: the harness adapter, the model endpoint and the environment.
+
+```python
+from nemo_fabric import Fabric, FabricConfig
+
+config = FabricConfig.from_mapping({
+    "metadata": {"name": "release-notes-agent"},
+    "harness": {"adapter_id": "nvidia.fabric.hermes"},
+    "models": {"default": {"provider": "openai", "model": "served-model",
+                           "base_url": "https://inference.example.com/v1",
+                           "api_key_env": "MODEL_API_KEY"}},
+})
+
+async with await Fabric().start_agent_package(
+    "examples/agent_package/release-notes-agent", config,
+    options={"variables": {"max_turns": 8}},
+) as runtime:
+    for line in runtime.agent_package_report.declared:
+        print(line.id, line.status, line.effect)
+    result = await runtime.invoke(input="Draft the notes for release 2.4.")
+```
+
+Nothing starts when the package is refused or when the load stops. Each line of `declared` is one thing the package declares, with a `status` and what the load did about it.
+
+## Where to Go Next
+
+| You want to | Read |
+| --- | --- |
+| Know what a package holds, which schema versions are read, and how variables and definitions work | [Package Format and Schema Versions](./agent-packages/format-and-versions.mdx) |
+| Load a package in Python or in a sandbox, and choose what a load does with something unsupported | [Load and Start a Package](./agent-packages/load-and-start.mdx) |
+| Complete a package whose lock pins content from git or an OCI image layout | [Fetch What a Lock Pins](./agent-packages/fetch.mdx) |
+| See how each field lands in the config, including the model and skills | [Map a Package Onto a Config](./agent-packages/map-onto-a-config.mdx) |
+| Handle connectors, plugins, hooks, called agents, custom tools and limits | [Connectors, Plugins, Tools and Bindings](./agent-packages/parts-and-bindings.mdx) |
+| Compare what an agent asks of its machine with what it has | [Runtime Needs and Facts](./agent-packages/runtime-needs.mdx) |
+| Look up a report member, an error code or a limit of the check | [Reference](./agent-packages/reference.mdx) |
+
+## Know Before You Start
+
+- **Your config names the models.** The loader writes no model of its own. Refer to [The Model](./agent-packages/map-onto-a-config.mdx#the-model).
+- **A package can carry a connector, and the mapped config starts it.** Load only a package you trust to run commands. Refer to [Connectors](./agent-packages/parts-and-bindings.mdx#connectors).
+- **The default settings stop many packages.** A package with a policy or a token budget does not load unless you set `if_unsupported="warn"`. Refer to [The Two Settings](./agent-packages/load-and-start.mdx#the-two-settings).
+- **The lock is checked against the folder it sits in.** Pass `expected_lock_sha256` to anchor it to a digest you hold. Refer to [Limits of the Check](./agent-packages/reference.mdx#limits-of-the-check).
+- **The loader fetches nothing.** Content from git or an OCI registry that is not in the folder is a separate step. Refer to [Fetch What a Lock Pins](./agent-packages/fetch.mdx).

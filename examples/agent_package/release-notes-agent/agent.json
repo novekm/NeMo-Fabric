@@ -1,0 +1,44 @@
+{
+  "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+  "type": "agent",
+  "name": "release-notes-agent",
+  "description": "Drafts release notes from a project's list of changes.",
+  "instructions": "You draft release notes. Read the changes with the changelog connector. Group them under Added, Changed and Fixed. Write one short line for each change and keep its own words where you can. At the end, say which changes you left out and why.",
+  "limits": {
+    "max_turns": {
+      "var": "max_turns"
+    },
+    "timeout_seconds": 600
+  },
+  "variables": {
+    "max_turns": {
+      "type": "number",
+      "default": 12,
+      "description": "Most turns one draft may take."
+    }
+  },
+  "skills": {
+    "release-notes": {
+      "source": "./skills/release-notes"
+    }
+  },
+  "connectors": {
+    "changelog": {
+      "source": "./connectors/changelog"
+    }
+  },
+  "tools": [
+    {
+      "connector": "changelog",
+      "tool": "list_changes"
+    }
+  ],
+  "runtime": {
+    "software": {
+      "python3": {
+        "version": ">= 3.11",
+        "reason": "The changelog connector is a Python program."
+      }
+    }
+  }
+}

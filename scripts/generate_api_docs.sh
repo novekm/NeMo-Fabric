@@ -24,6 +24,7 @@ PYTHONPATH="sdk/python/nemo-fabric-runtime/src" lazydocs \
   --overview-file "index.md" \
   "nemo_fabric.client" \
   "nemo_fabric.capabilities" \
+  "nemo_fabric.agent_package" \
   "nemo_fabric.check" \
   "nemo_fabric.runtime" \
   "nemo_fabric.service" \
@@ -89,6 +90,11 @@ add_frontmatter \
   "Adapter Capability Inspection" \
   "Inspect standalone adapter metadata and verify host/task descriptor correspondence." \
   "/reference/api/python-library-reference/capabilities"
+add_frontmatter \
+  "$out/nemo_fabric.agent_package.md" \
+  "Agent Packages" \
+  "Load an agent package: check its parts against the lock and map it to a configuration." \
+  "/reference/api/python-library-reference/agent-package"
 add_frontmatter \
   "$out/nemo_fabric.check.md" \
   "Runtime Health" \

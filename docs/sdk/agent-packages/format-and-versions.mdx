@@ -1,0 +1,75 @@
+---
+title: "Package Format and Schema Versions"
+description: "What an agent package holds, how it names its schema version, how variables and definitions work."
+---
+{/* SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 */}
+
+## What a Package Holds
+
+A package is written in OADL. Each document names its schema in `$schema`; [Schema Versions](#schema-versions) says which versions NeMo Fabric reads and what happens with another.
+
+| Path | What it is |
+| --- | --- |
+| `agent.json` | The agent: name, description, instructions, default model, limits, variables, parts and runtime needs. |
+| `agent-definition.json` | A definition: a pointer to one agent, values for that agent's variables, and parts or limits it adds. A package starts from an agent or from a definition. |
+| `oadl.lock.json` | The lock. It sits beside the entry document and has one entry for each part, with the part's source, version and digest. |
+| `skills/<name>/` | A skill folder with its `SKILL.md`. |
+| `connectors/<name>/` | A connector carried in the package. Its `mcp.json` says how to start the MCP server. |
+| `plugins/<name>/` | A plugin folder. |
+| `hooks/<name>/` | A hook folder. Its `hooks.json` lists the handlers and names their format in `$schema`. |
+| `policies/<name>/` | A policy folder. The loader pins and reports it. Refer to [How Fields Map](./map-onto-a-config.mdx#how-fields-map). |
+| `agents/<name>/agent.json` | An agent that this agent may call. |
+
+A lock digest is `sha256:` and 64 hexadecimal characters. For a file it is the SHA-256 of the file's bytes. For a folder it is the SHA-256 of a compact JSON array of `[path, file digest]` pairs, one for every file under the folder, sorted by path.
+
+A part with a local source is at the path its source names. A part with a git source is looked for at the path of its lock address, below the folder of the entry document: the part at `$/skills/release-notes` is the folder `skills/release-notes/`. Place the fetched content there, and the loader checks it against the pinned digest like any other part. `fetch_agent_package` places it for you: refer to [Fetch What a Lock Pins](./fetch.mdx#fetch-what-a-lock-pins). A git part that is not there is reported as `absent`.
+
+The [agent package example](https://github.com/NVIDIA/NeMo-Fabric/tree/main/examples/agent_package) holds a complete package with one skill, one carried connector and one definition.
+
+## Schema Versions
+
+The format is versioned, and every document states the version it is written for. NeMo Fabric ships the schemas of the versions it reads, compiles them into `nemo-fabric-core`, and never fetches one.
+
+| Question | Answer |
+| --- | --- |
+| Which versions does this release read? | OADL `0.0.1`. The schemas are under `crates/fabric-core/assets/oadl/0.0.1/`. The load report gives the version as `format_version`. |
+| How does a package state its version? | In `$schema`. The address of a schema holds the version, as in `https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json`. The lock names its own schema the same way. |
+| What happens with another version? | The package is refused with `package_schema_version`. The message names the `$schema` the document states, the version NeMo Fabric reads and the address it expects. Nothing is loaded and nothing is guessed. |
+| What about a `$schema` that is missing? | The same refusal. |
+
+A version is an exact match. This release reads one version, so a package written for any other version is refused, including a later one.
+
+A new version of the format reaches NeMo Fabric as an ordinary pull request. It adds that version's four schema files under `assets/oadl/<version>/`, adds a row for each file to the snapshot test in `crates/fabric-core/src/agent_package/schemas.rs`, replaces the vendored conformance cases, and changes the loader where the new version changes the rules. The digest of a document covers its `$schema`, so a package moved to a new version needs a new lock.
+
+
+## Variables
+
+An agent declares variables, each with a type and optionally a default, a list of allowed values and, for a number, a `minimum` and a `maximum`. A value comes from the first of these that gives one:
+
+1. The `variables` argument, from whoever starts the agent.
+2. The `variables` of the definition, when the package starts from one.
+3. The variable's default.
+
+The loader refuses a value for a name the agent does not declare, a value of another type, a value outside the allowed values or the range, and a variable with no value and no default. Each refusal names the variable. The report's `variables` list gives each value and where it came from.
+
+## A Definition and Its Agent
+
+When the entry document is a definition, the loader reads it together with the agent it points at. The agent always wins, so nothing is merged field by field.
+
+| Field | Rule |
+| --- | --- |
+| `variables` | The definition's values fill the agent's variables. |
+| `skills`, `plugins`, `connectors`, `hooks`, `packages`, `agents`, `policies`, `custom_tools`, `credentials` | The definition's entries are added. A name the agent already uses is refused with `package_definition_name_in_use`, unless the two entries are identical. |
+| `tools` | The definition's items are added after the agent's. An item already there is kept once. |
+| `limits` | For each limit the smaller number applies. A larger number in the definition is not an error: the agent's number applies, and the report notes it. |
+| `instructions` | The agent's text comes first. The definition's text follows after one empty line. |
+| `runtime` | Every need of the agent and every need of the definition is checked on its own and reported with the document it came from. |
+
+The lock of a definition sits beside it and pins the definition, its agent, the agent's parts and each part the definition adds. A definition kept inside its agent's package is loaded with the `entry` option:
+
+```python
+report = load_agent_package(package_dir, config, entry="variants/short/agent-definition.json")
+```
+
+In the report, `entry` is the definition and `agent` is the agent. Each line of `declared` has `stated_by: agent` or `stated_by: definition`. A line for a thing a called agent declares has `stated_by: called_agent`. Such lines are listed for a called agent you bound and for one that went to the adapter. The loader applies no policy about what a definition may add. A platform that has such a policy reads the lines stated by the definition and decides.

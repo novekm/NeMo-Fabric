@@ -54,6 +54,12 @@ Runtime-scoped overrides are recursively merged with invocation overrides; invoc
 
 ---
 
+### <kbd>property</kbd> agent_package_report
+
+Return the load report of ``Fabric.start_agent_package()``, or None.
+
+---
+
 ### <kbd>property</kbd> handle
 
 Return a detached snapshot of the runtime handle.

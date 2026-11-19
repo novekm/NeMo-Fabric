@@ -426,7 +426,7 @@ fn pressure(directory: &Path, controller: &str, category: &str) -> Measurement<u
     }
 }
 
-fn read_host(
+pub(crate) fn read_host(
     root: &Path,
     pid: u32,
     groups: &[SystemStatsMetricGroup],

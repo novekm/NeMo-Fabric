@@ -1,0 +1,27 @@
+{
+  "mode": "start",
+  "document": {
+    "$schema": "https://nvidia.github.io/oadl/schemas/0.0.1/agent.schema.json",
+    "type": "agent",
+    "name": "example",
+    "limits": {
+      "max_turns": {
+        "var": "max_turns"
+      }
+    },
+    "variables": {
+      "max_turns": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 60,
+        "default": 20
+      }
+    }
+  },
+  "values": {
+    "max_turns": 0
+  },
+  "expect": {
+    "agent": null
+  }
+}
