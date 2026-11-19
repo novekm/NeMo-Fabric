@@ -117,6 +117,13 @@ pub struct AgentPackageOptions {
     /// `checker_url`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checker_enforcers: Vec<String>,
+    /// A JSON object the platform supplies about this agent, such as the
+    /// record of a registry that lists it. It is sent to the checker URL as
+    /// `registration`, unchanged, beside `agent_digest`. NeMo Fabric looks
+    /// nothing up, reads nothing in it and sets nothing from the package.
+    /// Refused without `checker_url`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checker_registration: Option<serde_json::Map<String, serde_json::Value>>,
     /// The time limit of the checker, in seconds. Default 30. A checker that
     /// runs longer is ended, and the load is denied.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -138,6 +145,7 @@ impl Default for AgentPackageOptions {
             checker: None,
             checker_url: None,
             checker_enforcers: Vec::new(),
+            checker_registration: None,
             checker_timeout_seconds: None,
         }
     }

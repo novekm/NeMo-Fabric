@@ -48,12 +48,13 @@ pub use options::AgentPackageOptions;
 /// The facts a checker URL is sent for a package, built from its load report: what `checker_url` posts.
 ///
 /// Nothing is started and no checker is asked. `enforcers_present` is what the caller says runs where the agent
-/// starts, as `checker_enforcers` gives it.
+/// starts, as `checker_enforcers` gives it. `registration` is the platform's object, as `checker_registration` gives it.
 pub fn agent_package_start_facts(
     report: &AgentPackageReport,
     enforcers_present: &[String],
+    registration: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> serde_json::Value {
-    http_checker::start_facts(report, enforcers_present)
+    http_checker::start_facts_with(report, enforcers_present, registration)
 }
 pub use report::{
     AdapterReport, AgentPackageReport, CheckerDecision, CheckerFailure, CheckerResult,

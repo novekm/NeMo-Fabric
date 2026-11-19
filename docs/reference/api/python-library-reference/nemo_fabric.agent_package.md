@@ -33,6 +33,7 @@ load_agent_package(
     checker: 'Sequence[str] | None' = None,
     checker_url: 'str | None' = None,
     checker_enforcers: 'Sequence[str] | None' = None,
+    checker_registration: 'Mapping[str, Any] | None' = None,
     checker_timeout_seconds: 'float | None' = None
 ) → AgentPackageReport
 ```
@@ -74,6 +75,7 @@ The call is synchronous. With ``check_machine=True`` it can take a few seconds, 
  - <b>`posts plain facts about the agent`</b>:  each part with its type, source, version, digest and whether it is local, the models named, and the policies with the enforcers each needs. A ``200``
  - <b>`answer with ``"decision"`</b>:  "allow"`` lets the package start; a deny, a checker that cannot be reached, another status, or no answer in time does not. Only ``http`` is spoken. Naming it with ``checker`` is refused.
  - <b>`checker_enforcers`</b>:  The enforcers that run where the agent starts,  sent to ``checker_url``. Refused without ``checker_url``.
+ - <b>`checker_registration`</b>:  A JSON object the platform supplies about this  agent, such as the record of a registry that lists it. It is sent  to ``checker_url`` as ``registration``, unchanged, beside  ``agent_digest``. NeMo Fabric looks nothing up and reads nothing  in it. Refused without ``checker_url``.
  - <b>`checker_timeout_seconds`</b>:  The time limit of the checker, in seconds.  ``None`` uses 30. A checker that runs longer is ended, and the  load is denied.
 
 
@@ -99,13 +101,14 @@ agent_package_start_facts(
     package_dir: 'str | PathLike[str]',
     config: 'FabricConfig | None' = None,
     enforcers: 'Sequence[str]' = (),
+    checker_registration: 'Mapping[str, Any] | None' = None,
     **options: 'Any'
 ) → dict[str, Any]
 ```
 
 The facts NeMo Fabric sends a checker URL about a package, without starting anything.
 
-The package is loaded as ``load_agent_package`` loads it, with the same ``config`` and options, and no checker is asked. The answer is the JSON object ``checker_url`` posts, built by the same code: the agent's name and package digest, each part with its type, source, version, digest and whether it is local, the models named, and the policies with the enforcers each needs. ``enforcers`` is what ``checker_enforcers`` would send.
+The package is loaded as ``load_agent_package`` loads it, with the same ``config`` and options, and no checker is asked. The answer is the JSON object ``checker_url`` posts, built by the same code: the agent's name and package digest, each part with its type, source, version, digest and whether it is local, the models named, and the policies with the enforcers each needs. ``enforcers`` is what ``checker_enforcers`` would send, and ``checker_registration`` is the object ``checker_registration`` would add as ``registration``.
 
 
 

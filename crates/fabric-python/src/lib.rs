@@ -101,15 +101,28 @@ fn load_agent_package(
 
 /// The facts a checker URL is sent for the package of `report_json`, as JSON. Starts nothing, asks no checker.
 #[pyfunction]
-fn agent_package_start_facts(report_json: &str, enforcers_json: &str) -> PyResult<String> {
+#[pyo3(signature = (report_json, enforcers_json, registration_json=None))]
+fn agent_package_start_facts(
+    report_json: &str,
+    enforcers_json: &str,
+    registration_json: Option<&str>,
+) -> PyResult<String> {
     let report: nemo_fabric_core::agent_package::AgentPackageReport =
         serde_json::from_str(report_json)
             .map_err(|error| PyValueError::new_err(format!("not a load report: {error}")))?;
     let enforcers: Vec<String> = serde_json::from_str(enforcers_json).map_err(|error| {
         PyValueError::new_err(format!("enforcers are not a list of text: {error}"))
     })?;
+    let registration: Option<serde_json::Map<String, serde_json::Value>> = registration_json
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|error| {
+            PyValueError::new_err(format!("registration is not a JSON object: {error}"))
+        })?;
     to_json(&nemo_fabric_core::agent_package::agent_package_start_facts(
-        &report, &enforcers,
+        &report,
+        &enforcers,
+        registration.as_ref(),
     ))
 }
 

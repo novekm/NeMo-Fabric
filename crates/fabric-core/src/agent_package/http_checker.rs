@@ -119,6 +119,26 @@ impl Endpoint {
 /// agent. A policy needs the enforcers its folder has a folder for, such as
 /// `openshell/`. `enforcers_present` is what the caller says runs here.
 pub(super) fn start_facts(report: &AgentPackageReport, enforcers_present: &[String]) -> Value {
+    start_facts_with(report, enforcers_present, None)
+}
+
+/// `start_facts` with the `registration` object the platform supplied, passed through as it was given.
+pub(super) fn start_facts_with(
+    report: &AgentPackageReport,
+    enforcers_present: &[String],
+    registration: Option<&Map<String, Value>>,
+) -> Value {
+    let mut facts = base_facts(report, enforcers_present);
+    if let (Some(registration), Some(object)) = (registration, facts.as_object_mut()) {
+        object.insert(
+            "registration".to_string(),
+            Value::Object(registration.clone()),
+        );
+    }
+    facts
+}
+
+fn base_facts(report: &AgentPackageReport, enforcers_present: &[String]) -> Value {
     let mut parts = Vec::new();
     let mut models: Vec<String> = Vec::new();
     let mut policies = Vec::new();
@@ -255,6 +275,7 @@ pub(super) fn ask(
     endpoint: &Endpoint,
     report: &AgentPackageReport,
     enforcers_present: &[String],
+    registration: Option<&Map<String, Value>>,
     limit: Duration,
 ) -> CheckerResult {
     let failed = |failure, detail: String, answer| CheckerResult {
@@ -264,7 +285,7 @@ pub(super) fn ask(
         detail: Some(detail),
         answer,
     };
-    let body = start_facts(report, enforcers_present).to_string();
+    let body = start_facts_with(report, enforcers_present, registration).to_string();
     let (status, response) = match post(endpoint, body.as_bytes(), limit) {
         Ok(answered) => answered,
         Err((failure, detail)) => return failed(failure, detail, None),

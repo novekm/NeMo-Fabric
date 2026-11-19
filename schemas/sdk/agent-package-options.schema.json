@@ -64,6 +64,14 @@
       },
       "type": "array"
     },
+    "checker_registration": {
+      "additionalProperties": true,
+      "description": "A JSON object the platform supplies about this agent, such as the\nrecord of a registry that lists it. It is sent to the checker URL as\n`registration`, unchanged, beside `agent_digest`. NeMo Fabric looks\nnothing up, reads nothing in it and sets nothing from the package.\nRefused without `checker_url`.",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
     "checker_timeout_seconds": {
       "description": "The time limit of the checker, in seconds. Default 30. A checker that\nruns longer is ended, and the load is denied.",
       "format": "double",

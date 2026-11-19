@@ -67,6 +67,7 @@ enum Asked<'a> {
     Http {
         endpoint: Endpoint,
         enforcers: &'a [String],
+        registration: Option<&'a serde_json::Map<String, serde_json::Value>>,
     },
 }
 
@@ -107,9 +108,16 @@ impl<'a> Checker<'a> {
                     asked: Asked::Http {
                         endpoint,
                         enforcers: &options.checker_enforcers,
+                        registration: options.checker_registration.as_ref(),
                     },
                     limit,
                 }));
+            }
+            (_, None) if options.checker_registration.is_some() => {
+                return Err(invalid(
+                    "checker_registration",
+                    "checker_registration is sent only to a checker URL; name checker_url",
+                ));
             }
             (_, None) if !options.checker_enforcers.is_empty() => {
                 return Err(invalid(
@@ -142,7 +150,8 @@ impl<'a> Checker<'a> {
             Asked::Http {
                 endpoint,
                 enforcers,
-            } => http_checker::ask(endpoint, report, enforcers, self.limit),
+                registration,
+            } => http_checker::ask(endpoint, report, enforcers, *registration, self.limit),
         }
     }
 
@@ -1030,6 +1039,44 @@ mod tests {
     }
 
     #[test]
+    fn a_registration_the_platform_supplies_is_sent_unchanged_beside_the_digest() {
+        let package = code_reviewer("checker-url-registration");
+        let server = serve("200 OK", r#"{"decision": "allow"}"#, false, false);
+        let registration = json!({
+            "registry": "agent-registry",
+            "record_id": "r-1",
+            "status": "APPROVED",
+            "digest": "sha256:abc",
+            "nested": {"kept": [1, "two", null]}
+        });
+
+        let report = load(
+            &package,
+            AgentPackageOptions {
+                checker_registration: registration.as_object().cloned(),
+                ..asked_at(&server.url)
+            },
+        );
+
+        assert_eq!(report.outcome, PackageOutcome::Ready);
+        let body = body_of(&server.request.recv().expect("the request"));
+        assert_eq!(body["registration"], registration);
+        assert_eq!(
+            body["agent_digest"],
+            json!(format!("sha256:{}", report.lock.sha256))
+        );
+    }
+
+    #[test]
+    fn with_no_registration_the_body_has_no_registration_member() {
+        let package = code_reviewer("checker-url-no-registration");
+        let server = serve("200 OK", r#"{"decision": "allow"}"#, false, false);
+        load(&package, asked_at(&server.url));
+        let body = body_of(&server.request.recv().expect("the request"));
+        assert!(body.get("registration").is_none());
+    }
+
+    #[test]
     fn the_facts_name_the_model_the_config_binds_the_run_to() {
         let package = code_reviewer("checker-url-bound-model");
         let server = serve("200 OK", r#"{"decision": "allow"}"#, false, false);
@@ -1196,6 +1243,15 @@ mod tests {
                 "{named:?}"
             );
         }
+        let registration_alone = AgentPackageOptions {
+            checker_registration: json!({"status": "APPROVED"}).as_object().cloned(),
+            ..AgentPackageOptions::default()
+        };
+        assert!(matches!(
+            load_agent_package(&package.root, Some(config()), registration_alone, context()),
+            Err(FabricError::AgentPackage { ref code, ref subject, .. })
+                if code == "package_options_invalid" && subject == "checker_registration"
+        ));
         let enforcers_alone = AgentPackageOptions {
             checker_enforcers: vec!["openshell".to_string()],
             ..AgentPackageOptions::default()

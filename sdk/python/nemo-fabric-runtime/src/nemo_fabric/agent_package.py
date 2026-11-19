@@ -377,6 +377,7 @@ def load_agent_package(
     checker: Sequence[str] | None = None,
     checker_url: str | None = None,
     checker_enforcers: Sequence[str] | None = None,
+    checker_registration: Mapping[str, Any] | None = None,
     checker_timeout_seconds: float | None = None,
 ) -> AgentPackageReport:
     """Read, check and map one agent package. Fetches nothing.
@@ -483,6 +484,11 @@ def load_agent_package(
             ``checker`` is refused.
         checker_enforcers: The enforcers that run where the agent starts,
             sent to ``checker_url``. Refused without ``checker_url``.
+        checker_registration: A JSON object the platform supplies about this
+            agent, such as the record of a registry that lists it. It is sent
+            to ``checker_url`` as ``registration``, unchanged, beside
+            ``agent_digest``. NeMo Fabric looks nothing up and reads nothing
+            in it. Refused without ``checker_url``.
         checker_timeout_seconds: The time limit of the checker, in seconds.
             ``None`` uses 30. A checker that runs longer is ended, and the
             load is denied.
@@ -543,6 +549,8 @@ def load_agent_package(
                 details={"subject": "checker_enforcers"},
             )
         options["checker_enforcers"] = list(checker_enforcers)
+    if checker_registration is not None:
+        options["checker_registration"] = _registration_object(checker_registration)
     if checker_timeout_seconds is not None:
         options["checker_timeout_seconds"] = checker_timeout_seconds
     return AgentPackageReport.from_mapping(
@@ -621,10 +629,31 @@ def _load_report(
         ) from error
 
 
+def _registration_object(registration: Any) -> dict[str, Any]:
+    """The platform's registration as a plain JSON object, or a refusal."""
+    if not isinstance(registration, Mapping):
+        raise FabricConfigError(
+            "The agent package option checker_registration must be a JSON object",
+            stage=_STAGE,
+            code="package_options_invalid",
+            details={"subject": "checker_registration"},
+        )
+    try:
+        return json.loads(json.dumps(dict(registration)))
+    except (TypeError, ValueError) as error:
+        raise FabricConfigError(
+            "The agent package option checker_registration must be a JSON object",
+            stage=_STAGE,
+            code="package_options_invalid",
+            details={"subject": "checker_registration"},
+        ) from error
+
+
 _CHECKER_OPTIONS = (
     "checker",
     "checker_url",
     "checker_enforcers",
+    "checker_registration",
     "checker_timeout_seconds",
 )
 
@@ -634,6 +663,7 @@ def agent_package_start_facts(
     config: FabricConfig | None = None,
     *,
     enforcers: Sequence[str] = (),
+    checker_registration: Mapping[str, Any] | None = None,
     **options: Any,
 ) -> dict[str, Any]:
     """The facts NeMo Fabric sends a checker URL about a package, without starting anything.
@@ -644,7 +674,8 @@ def agent_package_start_facts(
     package digest, each part with its type, source, version, digest and
     whether it is local, the models named, and the policies with the
     enforcers each needs. ``enforcers`` is what ``checker_enforcers`` would
-    send.
+    send, and ``checker_registration`` is the object ``checker_registration``
+    would add as ``registration``.
 
     Raises:
         FabricConfigError: As ``load_agent_package`` raises it, and with code
@@ -664,7 +695,11 @@ def agent_package_start_facts(
     native = Fabric()._require_native_module("agent_package_start_facts")
     return json.loads(
         native.agent_package_start_facts(
-            json.dumps(report.to_dict()), json.dumps(list(enforcers))
+            json.dumps(report.to_dict()),
+            json.dumps(list(enforcers)),
+            None
+            if checker_registration is None
+            else json.dumps(_registration_object(checker_registration)),
         )
     )
 

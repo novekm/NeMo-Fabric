@@ -79,6 +79,52 @@ def test_the_facts_are_exactly_what_the_checker_url_is_sent(
     assert facts["hook_event_name"] == "AgentStart"
 
 
+def test_a_registration_the_platform_supplies_reaches_the_checker_and_the_facts(
+    package_dir, shim_config, hermes_shim_agent_dir
+):
+    registration = {"registry": "agent-registry", "status": "APPROVED", "nested": {"a": [1, None]}}
+    checker = _Checker()
+    try:
+        load_agent_package(
+            package_dir,
+            shim_config,
+            base_dir=hermes_shim_agent_dir,
+            checker_url=checker.url,
+            checker_registration=registration,
+        )
+    finally:
+        checker.close()
+    facts = agent_package_start_facts(
+        package_dir,
+        shim_config,
+        base_dir=hermes_shim_agent_dir,
+        checker_registration=registration,
+    )
+    assert checker.bodies == [facts]
+    assert facts["registration"] == registration
+    assert "registration" not in agent_package_start_facts(
+        package_dir, shim_config, base_dir=hermes_shim_agent_dir
+    )
+
+
+@pytest.mark.parametrize("registration", ["APPROVED", ["a"], {"bad": {1, 2}}])
+def test_a_registration_that_is_not_a_json_object_is_refused(package_dir, registration):
+    with pytest.raises(FabricConfigError) as raised:
+        agent_package_start_facts(package_dir, checker_registration=registration)
+    assert (raised.value.code, raised.value.details["subject"]) == (
+        "package_options_invalid",
+        "checker_registration",
+    )
+
+
+def test_a_registration_without_a_checker_url_is_refused(package_dir):
+    with pytest.raises(FabricConfigError) as raised:
+        load_agent_package(
+            package_dir, checker_registration={"status": "APPROVED"}
+        )
+    assert raised.value.code == "package_options_invalid"
+
+
 def test_the_facts_need_no_config_and_start_nothing(package_dir):
     facts = agent_package_start_facts(package_dir)
     assert facts["agent_name"] == "release-notes-agent"
