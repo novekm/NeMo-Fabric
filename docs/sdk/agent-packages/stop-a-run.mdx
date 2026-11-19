@@ -1,0 +1,70 @@
+---
+title: "Stop a Run"
+description: "End a running agent and the agents it calls for a reason, or when a policy server says a rule stopped it."
+---
+{/* SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 */}
+
+A package is checked once, before it starts. A rule can also end a run that is already going, for example when a policy server decides a tool call broke a rule. NeMo Fabric gives that decision one way in: `Runtime.stop_for`. A rule, a person with a kill switch, or a watch on a URL calls it. NeMo Fabric decides nothing about whether to stop: it ends the run it is told to end and records why.
+
+## Stop a Run and the Agents It Calls
+
+`Runtime.stop_for` stops a runtime for a reason, together with the runtimes of the agents it calls. You start those runtimes apart from the lead and pass them in `called`.
+
+```python
+record = await runtime.stop_for(
+    reason="a rule forbids this tool call",
+    requested_by="guardrails",
+    violation={"rule": "no-shell"},
+    called=[reviewer_runtime],
+)
+print(record["stop_id"], [item["stopped"] for item in record["runtimes"]])
+```
+
+| Argument | Meaning |
+| --- | --- |
+| `reason` | Why the run ends. It must not be blank. |
+| `requested_by` | Who asked. It must not be blank. |
+| `violation` | The decision that asked for the stop, as its rule wrote it. Leave it out for a stop no rule asked for, such as a kill switch. |
+| `quarantine` | `True` when the stop is a quarantine. NeMo Fabric records it. The checker that refuses later starts keeps the quarantine. |
+| `called` | The runtimes of the agents this one calls. |
+
+The lead stops first, so it starts no new call, and then each runtime in `called`. A runtime that fails to stop does not keep the others running. Nothing else is deleted: the workspace, the artifacts and the harness session stay.
+
+The result is the stop record: `stop_id`, `reason`, `requested_by`, `violation`, `quarantine`, the outcome of each runtime, and the events, which end with `runtime.stop_requested`. A blank reason or requester raises `FabricError`.
+
+A runtime has one stop. A stop that is already under way, by `stop()`, by `stop_for` or by a watch, is joined and not asked for again, and the runtimes in `called` that are still running are stopped on their own.
+
+## End a Run When a URL Says a Rule Stopped It
+
+`Runtime.watch_stop_url` asks a URL about the run and stops it when a rule did. The NeMo Guardrails hooks server answers at `/v1/runs/{runtime_id}`:
+
+```python
+watch = runtime.watch_stop_url(
+    "http://127.0.0.1:8100/v1/runs/{runtime_id}",
+    called=[reviewer_runtime],
+    if_unreachable="keep_running",
+)
+record = await watch
+```
+
+`{runtime_id}` in the URL is replaced by the runtime's id. The URL answers `{"stop": null}` while the run may go on. It answers `{"stop": {"outcome": "stop", "reason": "...", "by": "..."}}` when a rule ended the run, with `outcome` either `stop` or `quarantine`. NeMo Fabric then ends the run through `stop_for` with the reason, the requester, the answer as the violation, and `called`.
+
+The call returns a task. Its result is the stop record, or `None` when the runtime stopped some other way. The watch ends when the runtime stops by any means. Cancel the task to stop watching.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `interval_seconds` | `0.5` | The time between two questions. |
+| `timeout_seconds` | `5.0` | How long one question waits for an answer. |
+| `if_unreachable` | `"keep_running"` | What the run does while the URL does not answer: `"keep_running"` or `"stop"`. Another value is refused with `stop_watch_invalid`. |
+| `unreachable_after_seconds` | `30.0` | With `"stop"`, how long the URL must fail to answer in a row before the run ends. |
+
+A URL that cannot be reached, or that answers with another status or body, is logged and asked again. Whether the run goes on in the meantime is your choice. With `"keep_running"` it goes on. With `"stop"` it ends, with `called`, once the URL has not answered for `unreachable_after_seconds`. The requester is then `nemo-fabric`, and the reason says the server could not be reached. In both cases a harness hook that cannot reach the server denies the call it was asked about, so a tool call is never allowed on the strength of an unanswered question.
+
+Choose `"stop"` where an unchecked run is worse than a stopped one. Choose `"keep_running"` where an outage of the policy server must not end work in progress.
+
+## What Stopping Is Not
+
+- **It is not a policy.** NeMo Fabric holds no rule. The side that decides calls `stop_for`, or answers the URL.
+- **It is not a delete.** The workspace, artifacts and harness session stay.
+- **It does not start a quarantine.** `quarantine=True` is recorded. Refusing later starts belongs to the checker. Refer to [Check a Package Before It Starts](./check-before-start.mdx).

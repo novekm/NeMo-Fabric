@@ -99,6 +99,20 @@ fn load_agent_package(
     to_json(&report)
 }
 
+/// The facts a checker URL is sent for the package of `report_json`, as JSON. Starts nothing, asks no checker.
+#[pyfunction]
+fn agent_package_start_facts(report_json: &str, enforcers_json: &str) -> PyResult<String> {
+    let report: nemo_fabric_core::agent_package::AgentPackageReport =
+        serde_json::from_str(report_json)
+            .map_err(|error| PyValueError::new_err(format!("not a load report: {error}")))?;
+    let enforcers: Vec<String> = serde_json::from_str(enforcers_json).map_err(|error| {
+        PyValueError::new_err(format!("enforcers are not a list of text: {error}"))
+    })?;
+    to_json(&nemo_fabric_core::agent_package::agent_package_start_facts(
+        &report, &enforcers,
+    ))
+}
+
 fn parse_package_options<T: serde::de::DeserializeOwned>(options_json: &str) -> PyResult<T> {
     serde_json::from_str(options_json).map_err(|error| {
         to_py_error(FabricError::AgentPackage {
@@ -591,6 +605,28 @@ fn stop_runtime(py: Python<'_>, plan_json: String, runtime_json: String) -> PyRe
     to_json(&events)
 }
 
+/// Stop a running agent for a reason, with the runtimes of the agents it calls, and return
+/// StopRecord JSON. `called_json` is a list of `{"plan", "runtime"}` objects.
+#[pyfunction]
+fn stop_runtime_for(
+    py: Python<'_>,
+    plan_json: String,
+    runtime_json: String,
+    called_json: String,
+    request_json: String,
+) -> PyResult<String> {
+    let plan = parse_run_plan(plan_json)?;
+    let runtime = parse_runtime_handle(runtime_json)?;
+    let called: Vec<nemo_fabric_core::CalledRuntime> = serde_json::from_str(&called_json)
+        .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+    let request: nemo_fabric_core::StopRequest = serde_json::from_str(&request_json)
+        .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+    let record = py
+        .detach(|| nemo_fabric_core::stop_runtime_for(&plan, &runtime, &called, &request))
+        .map_err(to_py_error)?;
+    to_json(&record)
+}
+
 /// Read a resource snapshot of a started runtime and return RuntimeResourceSnapshot JSON.
 #[pyfunction]
 fn runtime_resource_snapshot(
@@ -660,6 +696,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(invoke_runtime, m)?)?;
     m.add_function(wrap_pyfunction!(invoke_openai_stream, m)?)?;
     m.add_function(wrap_pyfunction!(stop_runtime, m)?)?;
+    m.add_function(wrap_pyfunction!(stop_runtime_for, m)?)?;
+    m.add_function(wrap_pyfunction!(agent_package_start_facts, m)?)?;
     m.add_function(wrap_pyfunction!(runtime_resource_snapshot, m)?)?;
     Ok(())
 }

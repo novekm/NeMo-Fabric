@@ -9,6 +9,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
+import time
 from collections.abc import Mapping, Sequence
 from contextlib import AsyncExitStack
 from copy import deepcopy
@@ -123,6 +124,9 @@ class Runtime:
         self._stream_cleanup_failed: set[str] = set()
         self._closing = False
         self._agent_package_report: AgentPackageReport | None = None
+        # The one stop of this runtime. `stop`, `stop_for`, a stop watch and
+        # cleanup all join it, so no path asks for a second native stop.
+        self._stop_operation: asyncio.Future[dict[str, Any] | None] | None = None
 
     @property
     def status(self) -> RuntimeStatus:
@@ -307,6 +311,13 @@ class Runtime:
                         self._absorb(RunResult.from_mapping(native_result))
                     except Exception:
                         pass
+                if self._stop_operation is not None:
+                    # A stop is already under way; it ends the invocation.
+                    raise
+                cancel_stop: asyncio.Future[dict[str, Any] | None] = (
+                    asyncio.get_running_loop().create_future()
+                )
+                self._stop_operation = cancel_stop
                 stopped = False
 
                 def stop_after_cancel() -> Any:
@@ -334,6 +345,9 @@ class Runtime:
                     self._status = RuntimeStatus.FAILED
                 else:
                     self._status = RuntimeStatus.STOPPED
+                finally:
+                    if not cancel_stop.done():
+                        cancel_stop.set_result(None)
                 raise
             except FabricError as error:
                 if (
@@ -832,7 +846,9 @@ class Runtime:
         """Stop the runtime, interrupting an active buffered invocation if needed.
 
         Repeated calls after a successful stop are no-ops. A failed runtime may
-        still be stopped so its resources are released.
+        still be stopped so its resources are released. A stop already under
+        way, by this method, :meth:`stop_for` or a stop watch, is joined, not
+        asked for again.
 
         Raises:
             FabricStateError: If the runtime is already stopping or has an
@@ -841,6 +857,10 @@ class Runtime:
             FabricRuntimeError: If native runtime shutdown fails.
         """
 
+        if self._stop_operation is not None:
+            await asyncio.shield(self._stop_operation)
+            await self._close_streaming_resources()
+            return
         if self._status is RuntimeStatus.STOPPED:
             await self._close_streaming_resources()
             return
@@ -855,6 +875,10 @@ class Runtime:
         if self._closing:
             raise FabricStateError("runtime shutdown is already in progress")
         self._closing = True
+        operation: asyncio.Future[dict[str, Any] | None] = (
+            asyncio.get_running_loop().create_future()
+        )
+        self._stop_operation = operation
         stopped = False
         stop_error: BaseException | None = None
         try:
@@ -896,6 +920,11 @@ class Runtime:
             self._status = RuntimeStatus.STOPPED
         finally:
             self._closing = False
+            if not operation.done():
+                operation.set_result(None)
+            if self._status is not RuntimeStatus.STOPPED:
+                # A failed stop may be asked again, so its resources are released.
+                self._stop_operation = None
             self._client._record_stopped_runtime(self)
             try:
                 await self._deregister_requests()
@@ -910,6 +939,238 @@ class Runtime:
                     )
             finally:
                 await self._close_streaming_resources()
+
+    async def stop_for(
+        self,
+        *,
+        reason: str,
+        requested_by: str,
+        violation: Mapping[str, Any] | None = None,
+        quarantine: bool = False,
+        called: Sequence[Runtime] = (),
+    ) -> dict[str, Any]:
+        """Stop this runtime for a reason, with the runtimes of the agents it calls.
+
+        A rule that ends a run, or a person with no violation (a kill switch),
+        calls this. The lead stops first, so it starts no new call, then each
+        runtime in ``called``. A runtime that fails to stop does not keep the
+        others running. Nothing else is deleted: the workspace, the artifacts
+        and the harness session stay.
+
+        Args:
+            reason: Why the run ends. Not blank.
+            requested_by: Who asked. Not blank.
+            violation: The decision that asked for the stop, as its rule wrote
+                it. ``None`` for a stop no rule asked for.
+            quarantine: Whether the stop is a quarantine. The quarantine itself
+                is kept by the checker that refuses later starts.
+            called: Runtimes of agents this one calls, started apart from it.
+
+        Returns:
+            The stop record: ``stop_id``, ``reason``, ``requested_by``,
+            ``violation``, ``quarantine``, the outcome of each runtime, and the
+            events, ending with ``runtime.stop_requested``.
+
+        Raises:
+            FabricError: If the reason or the requester is blank.
+        """
+
+        if self._stop_operation is not None:
+            # This run is already stopping or stopped: join that stop, then end
+            # the called runtimes that are not, each with its own one stop.
+            earlier = await asyncio.shield(self._stop_operation)
+            for runtime in called:
+                await runtime.stop()
+            if earlier is not None:
+                return earlier
+            return {
+                "reason": reason,
+                "requested_by": requested_by,
+                "violation": None if violation is None else dict(violation),
+                "quarantine": quarantine,
+                "joined": "the runtime was already stopping or stopped",
+                "runtimes": [
+                    {
+                        "runtime_id": runtime.runtime_id,
+                        "role": "lead" if runtime is self else "called",
+                        "stopped": runtime._status is RuntimeStatus.STOPPED,
+                    }
+                    for runtime in (self, *called)
+                ],
+                "events": [],
+            }
+        called = [runtime for runtime in called if runtime._stop_operation is None]
+        runtimes = [self, *called]
+        operation: asyncio.Future[dict[str, Any] | None] = (
+            asyncio.get_running_loop().create_future()
+        )
+        for runtime in runtimes:
+            runtime._stop_operation = operation
+        native = self._client._require_native_module("stop")
+        request = {
+            "reason": reason,
+            "requested_by": requested_by,
+            "quarantine": quarantine,
+        }
+        if violation is not None:
+            request["violation"] = dict(violation)
+        called_json = json.dumps(
+            [
+                {
+                    "plan": runtime._plan.to_mapping(),
+                    "runtime": runtime._runtime.to_mapping(),
+                }
+                for runtime in called
+            ]
+        )
+
+        def stop() -> Any:
+            return json.loads(
+                native.stop_runtime_for(
+                    json.dumps(self._plan.to_mapping()),
+                    json.dumps(self._runtime.to_mapping()),
+                    called_json,
+                    json.dumps(request),
+                )
+            )
+
+        for runtime in runtimes:
+            runtime._closing = True
+        try:
+            record = await _call_blocking(stop)
+        except Exception as error:
+            # Refused or failed before any runtime was stopped: the status stays,
+            # and a stop may be asked again.
+            for runtime in runtimes:
+                runtime._stop_operation = None
+            if not operation.done():
+                operation.set_result(None)
+            raise _runtime_error(error, stage="stop") from error
+        finally:
+            for runtime in runtimes:
+                runtime._closing = False
+        for runtime, outcome in zip(runtimes, record["runtimes"]):
+            runtime._status = (
+                RuntimeStatus.STOPPED if outcome["stopped"] else RuntimeStatus.FAILED
+            )
+            self._client._record_stopped_runtime(runtime)
+            try:
+                await runtime._deregister_requests()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "ATOF collector deregistration failed during a stop: %s",
+                    cleanup_error,
+                )
+            finally:
+                await runtime._close_streaming_resources()
+        operation.set_result(record)
+        return record
+
+    def watch_stop_url(
+        self,
+        url: str,
+        *,
+        called: Sequence[Runtime] = (),
+        interval_seconds: float = 0.5,
+        timeout_seconds: float = 5.0,
+        if_unreachable: Literal["keep_running", "stop"] = "keep_running",
+        unreachable_after_seconds: float = 30.0,
+    ) -> asyncio.Task[dict[str, Any] | None]:
+        """Watch a URL that says whether a rule stopped this run, and stop it when one did.
+
+        ``url`` may hold ``{runtime_id}``, such as
+        ``http://127.0.0.1:8100/v1/runs/{runtime_id}``, the NeMo Guardrails
+        hooks server's answer to which run a stop belongs to. The harness names
+        the run in each check with this runtime's id. The answer is
+        ``{"stop": null}``, or ``{"stop": {"outcome": "stop" | "quarantine",
+        "reason": ..., "by": ...}}``. On a stop the run ends through
+        :meth:`stop_for`, with ``called``, the reason and who asked, the answer
+        as the violation, and ``quarantine`` for a quarantine.
+
+        The watch ends when this runtime stops by any means. Cancel the task
+        to stop watching.
+
+        A URL that cannot be reached, or answers with another status or body,
+        is logged and asked again. What the run does meanwhile is the
+        operator's choice, ``if_unreachable``: ``"keep_running"`` (the
+        default) leaves it running; ``"stop"`` ends it, with ``called``, once
+        the URL has not answered for ``unreachable_after_seconds`` in a row,
+        requested by ``nemo-fabric`` with the reason that the server could not
+        be reached. Either way a harness hook that cannot reach the server
+        denies the call it asked about.
+
+        Returns:
+            A task whose result is the stop record, or ``None`` when the
+            runtime stopped otherwise.
+        """
+
+        if if_unreachable not in ("keep_running", "stop"):
+            raise FabricConfigError(
+                "if_unreachable must be 'keep_running' or 'stop'",
+                stage="stop",
+                code="stop_watch_invalid",
+            )
+        target = url.replace("{runtime_id}", self.runtime_id)
+
+        async def watch() -> dict[str, Any] | None:
+            import httpx
+
+            unreachable_since: float | None = None
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                while (
+                    self._status is RuntimeStatus.ACTIVE and self._stop_operation is None
+                ):
+                    answered = False
+                    try:
+                        response = await client.get(target)
+                        stop = (
+                            response.json().get("stop")
+                            if response.status_code == 200
+                            else None
+                        )
+                        answered = response.status_code == 200
+                        if response.status_code != 200:
+                            logger.warning(
+                                "stop URL %s answered HTTP %s",
+                                target,
+                                response.status_code,
+                            )
+                    except (httpx.HTTPError, ValueError, AttributeError) as error:
+                        logger.warning("stop URL %s did not answer: %s", target, error)
+                        stop = None
+                    if isinstance(stop, Mapping) and stop.get("outcome") in (
+                        "stop",
+                        "quarantine",
+                    ):
+                        return await self.stop_for(
+                            reason=str(stop.get("reason") or "a rule stopped the run"),
+                            requested_by=str(stop.get("by") or target),
+                            violation=stop,
+                            quarantine=stop.get("outcome") == "quarantine",
+                            called=called,
+                        )
+                    now = time.monotonic()
+                    if answered:
+                        unreachable_since = None
+                    elif unreachable_since is None:
+                        unreachable_since = now
+                    if (
+                        if_unreachable == "stop"
+                        and unreachable_since is not None
+                        and now - unreachable_since >= unreachable_after_seconds
+                    ):
+                        return await self.stop_for(
+                            reason=(
+                                f"the stop URL {target} did not answer for "
+                                f"{unreachable_after_seconds:g} seconds"
+                            ),
+                            requested_by="nemo-fabric",
+                            called=called,
+                        )
+                    await asyncio.sleep(interval_seconds)
+            return None
+
+        return asyncio.create_task(watch(), name=f"fabric-stop-watch-{self.runtime_id}")
 
     async def _deregister_requests(self) -> None:
         errors: list[Exception] = []

@@ -6,6 +6,7 @@
 mod adapter;
 mod bindings;
 mod called;
+mod checker;
 mod connector;
 mod definition;
 mod digest;
@@ -14,6 +15,7 @@ mod error;
 mod facts;
 mod fetch;
 mod graph;
+mod http_checker;
 mod json;
 mod load;
 mod lock;
@@ -42,7 +44,19 @@ pub use model::{
     Note, NoteCode, PackageAction, SourceType, StatedBy, ValueOrigin, VariableValue,
 };
 pub use options::AgentPackageOptions;
+
+/// The facts a checker URL is sent for a package, built from its load report: what `checker_url` posts.
+///
+/// Nothing is started and no checker is asked. `enforcers_present` is what the caller says runs where the agent
+/// starts, as `checker_enforcers` gives it.
+pub fn agent_package_start_facts(
+    report: &AgentPackageReport,
+    enforcers_present: &[String],
+) -> serde_json::Value {
+    http_checker::start_facts(report, enforcers_present)
+}
 pub use report::{
-    AdapterReport, AgentPackageReport, DeclaredItem, DeclaredKind, DeclaredStatus, DigestCheck,
-    ItemEffect, MappingGap, ModelOrigin, ModelReport, PackageOutcome,
+    AdapterReport, AgentPackageReport, CheckerDecision, CheckerFailure, CheckerResult,
+    DeclaredItem, DeclaredKind, DeclaredStatus, DigestCheck, ItemEffect, MappingGap, ModelOrigin,
+    ModelReport, PackageOutcome,
 };

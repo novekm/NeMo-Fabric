@@ -328,6 +328,23 @@ Each entry in `nemo_fabric.agents.v1` becomes one Claude subagent. The key is th
 
 Claude starts a called agent with its `Agent` tool. When the configuration sets `tools.enabled`, list `Agent` there, or Claude cannot call any of them.
 
+## Check Tool Calls and the Model with NeMo Guardrails
+
+Set `nemo_guardrails` in the harness settings to have a NeMo Guardrails hooks server decide each tool call and the model of each invocation:
+
+```json
+{"harness": {"adapter_id": "nvidia.fabric.claude", "settings": {"nemo_guardrails": {"url": "http://127.0.0.1:8100"}}}}
+```
+
+| What | How it works |
+|---|---|
+| Each tool call | A PreToolUse hook posts the call to `/v1/hooks/claude-code` with `x-nemo-run-id` (the runtime id), `x-nemo-agent-name` and `x-nemo-agent-digest`. The server's answer goes to Claude Code as it is: a deny blocks the call, and `continue: false` ends the run. |
+| The model | Before each invocation the adapter posts the model it is about to run, as `<provider>::<model>`, to `/v1/hooks/model-call`. A deny refuses the invocation with `claude_model_refused`, and nothing runs. |
+| No answer | A server that does not answer within `timeout_seconds` (30 by default) denies the call or refuses the model. |
+| The agent's name and digest | `start_agent_package` sets `agent_name` and `agent_digest` from the package. Set them yourself when you start a runtime without a package. |
+
+The model check sees the model this adapter configures for each invocation. A model that Claude Code picks for its own background work is not asked about; check every model request in a gateway in front of the model.
+
 ## Runtime Health
 
 `Fabric.check()` supports `live`, `active`, and `ready`. Liveness observes the owned CLI process. Active and ready require a fresh, valid `get_mcp_status()` response; reported MCP connection failures do not themselves fail readiness.

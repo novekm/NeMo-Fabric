@@ -39,7 +39,7 @@ The agent meant here is the agent that runs: its variables filled in, and read t
 | `model.capabilities`, `model.min_context_tokens` | A runtime need. | Status from the `model` fact. |
 | `limits.max_turns` | `runtime.max_turns` | Follows `if_unsupported` when the adapter does not accept it, or when the number is above 4294967295. |
 | `limits.timeout_seconds` | `runtime.timeout_seconds`. It bounds each invocation. A called agent you bind and run outside the invocation is yours to bound, and the line's `detail` says so. | Follows `if_unsupported` when the number is too large to hold as a duration. |
-| `limits.max_parallel`, `limits.max_depth`, `limits.max_total_tokens` | Nothing. NeMo Fabric cannot enforce them, and the line names the component that does. | Follows `if_unsupported`. Refer to [Limits](./parts-and-bindings.mdx#limits). |
+| `limits.max_parallel`, `limits.max_depth`, `limits.max_total_tokens` | Nothing. NeMo Fabric cannot enforce them, and the line names the component that does. With a binding that names who enforces it, the line is `bound` and keeps the value. | Follows `if_unsupported` without a binding. Refer to [Limits](./parts-and-bindings.mdx#limits). |
 | `skills.<name>` | One `skills.paths` entry, or one `skill` entry of `skills.directories` when the config sets that field: the verified folder. | Follows `if_unsupported`. Refer to [Skills](#skills). |
 | `skills.<name>.variables` | Nothing. | Follows `if_unsupported`. |
 | `connectors.<name>`, carried in the package | `mcp.servers.<key>` as a stdio server. | Follows `if_unsupported`. |

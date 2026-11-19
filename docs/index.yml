@@ -81,6 +81,12 @@ navigation:
         path: ./sdk/agent-packages/format-and-versions.mdx
       - page: Load and Start a Package
         path: ./sdk/agent-packages/load-and-start.mdx
+      - page: Check a Package Before It Starts
+        path: ./sdk/agent-packages/check-before-start.mdx
+      - page: Check a Package Before It Starts
+        path: ./sdk/agent-packages/check-before-start.mdx
+      - page: Stop a Run
+        path: ./sdk/agent-packages/stop-a-run.mdx
       - page: Fetch What a Lock Pins
         path: ./sdk/agent-packages/fetch.mdx
       - page: Map a Package Onto a Config

@@ -108,6 +108,21 @@ def alternate_skill_fixture() -> Path:
     return CUR_DIR / "fixtures" / "alternate"
 
 
+@pytest.fixture(name="package_checker")
+def package_checker_fixture() -> Callable[..., list[str]]:
+    """The command of the test checker for agent packages.
+
+    The first argument says how the checker answers, for example ``allow`` or
+    ``deny``. A second one is a file it writes what it was given to.
+    """
+
+    def command(answer: str, *record: Path) -> list[str]:
+        script = CUR_DIR / "fixtures" / "package_checker.py"
+        return [sys.executable, str(script), answer, *map(str, record)]
+
+    return command
+
+
 @pytest.fixture(name="make_read_only")
 def make_read_only_fixture() -> Iterator[Callable[[Path], Path]]:
     """Remove write permission from a folder and everything in it, as a read-only

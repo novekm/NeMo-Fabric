@@ -47,6 +47,38 @@
       "description": "Probe this machine for runtime facts. Default false. The probe does\nnot look for installed software packages.",
       "type": "boolean"
     },
+    "checker": {
+      "description": "A program that decides whether the loaded package may start: the\nprogram, then its arguments. Left out: no checker is asked. An empty\nlist is refused.\n\nThe checker is asked once, after the package passed its own checks and\nwas mapped. It is started with no shell. It gets the package folder in\n`NEMO_FABRIC_PACKAGE_DIR`, the path of a copy of the load report\nwithout its config in `NEMO_FABRIC_PACKAGE_REPORT`, and the name of the\nentry document in `NEMO_FABRIC_AGENT_NAME`. The loader adds nothing to\nits arguments. Of the caller's environment it keeps operating-system\nvariables such as `PATH` and `HOME`, and no other.\n\nThe checker writes one JSON object to standard output. Exit code 0\nwith `\"decision\": \"allow\"` lets the package start. Exit code 2 with\n`\"decision\": \"deny\"` does not. Anything else is a deny, reported as a\nchecker that failed. The report holds the answer under\n`checker_result`, and a load the checker does not allow has outcome\n`denied` and no config.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "checker_enforcers": {
+      "description": "The enforcers that run where the agent starts, such as `openshell`,\nsent to the checker URL as `enforcers_present`. Refused without\n`checker_url`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "checker_timeout_seconds": {
+      "description": "The time limit of the checker, in seconds. Default 30. A checker that\nruns longer is ended, and the load is denied.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "checker_url": {
+      "description": "A checker reached over HTTP, in place of a program: an `http://` URL\nsuch as `http://127.0.0.1:8100/v1/hooks/agent-start`. Left out: no\nHTTP checker is asked. Naming it together with `checker` is refused.\n\nThe loader posts plain facts about the agent, gathered from the load:\nthe agent's name, each part with its type, source, version, digest\nand whether the source is local, the models named, and the policies\nwith the enforcers each needs. The body is the request of the NeMo\nGuardrails hooks server's `/v1/hooks/agent-start` endpoint. A `200`\nanswer with `\"decision\": \"allow\"` lets the package start, and one\nwith `\"decision\": \"deny\"` does not. Anything else is a deny, reported\nas a checker that failed: a checker that cannot be reached, another\nstatus, an answer with no decision, or no answer in time. The address\ncomes from these options, never from the package. Only `http` is\nspoken; reach a remote checker through a local address.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "entry": {
       "description": "The entry document, as a path inside the package, when it is not at the root\n(for example a definition kept at `variants/short/agent-definition.json`).",
       "type": [

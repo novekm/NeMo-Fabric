@@ -1,0 +1,176 @@
+---
+title: "Check a Package Before It Starts"
+description: "Decide whether a loaded package may start: a check function, a checker program or a checker URL."
+---
+{/* SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 */}
+
+## Decide Before the Start
+
+A package can pass every check of the loader and still be one you do not want to start. Its lock is not the one your registry holds, it brings a hook, or it carries a connector you do not trust. NeMo Fabric has one place to say no, after the load and before the start. In Python, pass a function as `check`. In any place that loads a package, name a checker program in the load options, as [Ask a Checker Program](#ask-a-checker-program) describes. NeMo Fabric decides nothing there itself: it asks, and it starts only on `allow`.
+
+This decision is not a health check. `Fabric.check()` and `fabric-agent-ctl check` ask whether a runtime that already started is healthy, as [Health Checks](../health-checks.mdx) describes. The `check` argument and the `checker` option here decide whether a package starts at all.
+
+To decide whether a loaded package may start, pass `check`. It is a function that takes the load report and returns a mapping. The start goes ahead only when the mapping's `decision` is `allow`. A package can carry a connector, and the mapped config starts its command. The following check allows only the carried connectors you trust:
+
+```python
+TRUSTED_CONNECTORS = {"agent:/connectors/changelog"}
+
+def only_trusted_connectors(report):
+    carried = {line.id for line in report.declared
+               if line.field == "connectors" and line.status == "mapped"}
+    unknown = sorted(carried - TRUSTED_CONNECTORS)
+    if unknown:
+        return {"decision": "deny",
+                "reasons": [f"{name} starts a command that is not trusted" for name in unknown]}
+    return {"decision": "allow"}
+
+runtime = await Fabric().start_agent_package(
+    "/sandbox/agent", config, base_dir="/sandbox", check=only_trusted_connectors,
+)
+```
+
+A hook and a plugin also start commands, on an adapter that takes them. They are lines of `report.declared` with the fields `hooks` and `plugins`, and a check can decide on them the same way.
+
+These rules hold for a check:
+
+- **It is asked once, after the load and before the start.** A plain function runs in a worker thread. A coroutine function is awaited.
+- **It is asked only about a package that can start.** A package that is refused, or a load that stopped, raises its own error first, and the check is not called.
+- **It fails closed.** Any answer other than a mapping whose `decision` is the string `allow` stops the start, and so does a check that raises.
+- **NeMo Fabric reads `decision` and nothing else.** The mapping can carry more, such as `reasons`, the name of the checker or the rules that decided. When the start is stopped, the error holds a plain copy of the mapping.
+- **It receives the load report.** The report is read only. A check can keep it for later.
+- **NeMo Fabric runs no check of its own.** The rules are yours. A check that decides by fixed rules gives the same answer for the same package.
+
+A start that the check stops raises `FabricConfigError` with `stage == "agent_package"` and one of these codes:
+
+| Code | When |
+| --- | --- |
+| `package_check_denied` | The check did not allow the start. `details["answer"]` holds a plain copy of its answer. An answer that is not JSON-compatible is named by its type in `details["answer_type"]`. |
+| `package_check_failed` | The check raised. The exception is the cause of the error. |
+
+## Ask a Checker Program
+
+A checker is a program that decides whether a loaded package may start. Name it in the load options as `checker`: the program, then its arguments. Use one when the decision belongs to a tool outside your application, such as the policy checker of a platform team, or when no Python caller sits between the load and the start. The following call starts the agent only when the checker allows it:
+
+```python
+runtime = await Fabric().start_agent_package(
+    "/sandbox/agent", config, base_dir="/sandbox",
+    options={"checker": ["/opt/platform/bin/check-package", "--policy", "/etc/platform/policy"]},
+)
+```
+
+The option means the same in every place that loads a package: `Fabric.start_agent_package`, `load_agent_package`, and the options file of `fabric-agent-ctl`. The list must name a program. An empty list is refused with `package_options_invalid` in each of those places, so a start command that builds the list from an empty setting never starts a package unchecked.
+
+The loader asks the checker once, last, after the package passed its own checks and was mapped. The following table is the whole contract between NeMo Fabric and a checker:
+
+| Point | What holds |
+| --- | --- |
+| How it is started | With no shell, in your working directory, and with the arguments you gave. Nothing is added to them. |
+| What it is given | Three environment variables. `NEMO_FABRIC_PACKAGE_DIR` is the package folder. `NEMO_FABRIC_PACKAGE_REPORT` is the path of a private file with the load report, without its `config` member. `NEMO_FABRIC_AGENT_NAME` is the name of the entry document. The file is in a folder of its own under the temp folder and is removed when the checker ended. It stays behind when the loading process is killed during the check. |
+| What else it sees | These variables of your environment, when they are set: `PATH`, `HOME`, `USER`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TMPDIR`, `TMP`, `TEMP`, `SYSTEMROOT`, `COMSPEC`, `PATHEXT` and `USERPROFILE`. No other variable reaches it, so no credential held in an environment variable does. Its standard input is empty. |
+| What it answers | One JSON object on standard output, and an exit code. Exit code 0 with `"decision": "allow"` lets the package start. Exit code 2 with `"decision": "deny"` does not. |
+| Anything else | A deny, reported as a checker that failed: another exit code, output that is not one JSON object, a `decision` that does not fit the exit code, a program that cannot be started, a time limit that passed, or more written than the checker may write. |
+| The time limit | `checker_timeout_seconds` in the load options, 30 by default. A checker that runs longer is ended. |
+| How much it may write | 1 MiB to standard output and 1 MiB to standard error. A checker that writes more fails as `output_too_large`, with no exit code and no answer. That result is the same whether the checker was still running or had already ended. A checker that is still running is ended, so a checker that goes wrong cannot fill the disk. |
+| A program the checker starts | Neither limit ends it. A program the checker leaves behind can keep writing to the checker's standard output and standard error after the load returned. What it writes there before the loader has read them counts as the checker's own, so such a load can be denied as `output_too_large` or `invalid_answer`. |
+| What is kept | The report's `checker_result` member: the decision, the failure when there is one, the exit code, a `detail` text for a failure, and the checker's object as `answer`. NeMo Fabric reads `decision` from the object and nothing else. The order of the object's keys is not kept, and a number is read as a JSON number, so write a digest or a serial number as text. |
+| When it is not asked | For a package that is refused, for a load that stopped, and for a load with no config. With no `checker`, nothing is asked and the load is what it was. |
+
+A checker reads the report file and applies its rules. The following checker is complete. It allows a package only when every connector the package carries is on a list:
+
+```python
+#!/usr/bin/env python3
+import json
+import os
+import sys
+
+TRUSTED_CONNECTORS = {"agent:/connectors/changelog"}
+
+with open(os.environ["NEMO_FABRIC_PACKAGE_REPORT"], encoding="utf-8") as file:
+    report = json.load(file)
+carried = {line["id"] for line in report["declared"]
+           if line["field"] == "connectors" and line["status"] == "mapped"}
+unknown = sorted(carried - TRUSTED_CONNECTORS)
+if unknown:
+    print(json.dumps({"decision": "deny",
+                      "reasons": [f"{name} starts a command that is not trusted" for name in unknown]}))
+    sys.exit(2)
+print(json.dumps({"decision": "allow"}))
+```
+
+The object can carry more than the decision. A checker can add its `reasons`, the `rules` that decided, and a `checker` object with its name, its version and a digest of its policy. NeMo Fabric keeps all of it in the report and reads none of it.
+
+A load the checker does not allow has `outcome: denied` and no config. Its report holds the answer, shown here without the other members:
+
+```json
+{
+  "outcome": "denied",
+  "checker_result": {
+    "decision": "deny",
+    "failure": null,
+    "exit_code": 2,
+    "detail": null,
+    "answer": {
+      "decision": "deny",
+      "reasons": ["agent:/connectors/changelog starts a command that is not trusted"]
+    }
+  }
+}
+```
+
+For such a load, `report.to_config()` and `Fabric.start_agent_package` raise `FabricConfigError` with `stage == "agent_package"` and one of these codes:
+
+| Code | When |
+| --- | --- |
+| `package_check_denied` | The checker answered `deny`. `details["answer"]` holds its object. |
+| `package_check_failed` | The checker failed. `details["failure"]` is `not_started`, `timed_out`, `output_too_large`, `unexpected_exit` or `invalid_answer`. `details["exit_code"]` and `details["answer"]` hold what the checker gave, when it gave any. `details["detail"]` says more, when there is more to say. |
+
+For a checker that failed, `detail` is one of three texts. It is what the operating system said about a checker that could not be started, or that the checker wrote more than it may, or else the end of what the checker wrote to standard error, at most 2000 characters. A checker that answered as it must has no `detail`, and what it wrote to standard error is dropped.
+
+When you pass a checker and a `check` function, the checker is asked first, during the load. The function is called only when the checker allowed the start, and the report it receives holds the checker's answer in `checker_result`.
+
+## Ask a Checker URL
+
+A checker can also be a server. Name it in the load options as `checker_url`, in place of `checker`: an `http://` URL. The loader posts plain facts about the agent and reads the decision from the answer. The server reads no package. The NeMo Guardrails hooks server answers this request at `/v1/hooks/agent-start`:
+
+```python
+runtime = await fabric.start_agent_package(
+    package_dir,
+    config,
+    options={
+        "checker_url": "http://127.0.0.1:8100/v1/hooks/agent-start",
+        "checker_enforcers": ["openshell"],
+    },
+)
+```
+
+| What | How it works |
+|---|---|
+| What it is sent | One JSON object: `hook_event_name` (`AgentStart`), `agent_name`, `parts`, `models`, `declared_models`, `bound_model`, `policies` and `enforcers_present`. A part is every lock entry below the entry document, called agents and their parts included, with its `id` (the lock address), `type`, `source` as the package states it (such as `git::<url>//<subpath>`), `version`, `digest` and `local`. `models` holds every model the run may use: the agent's default model and any pinned model, listed again in `declared_models`, and the model your config binds the run to, as `<provider>::<model>`, also given as `bound_model`. So a rule judges the model that will really run. A policy lists as its `enforcers` the folders its package has, such as `openshell`. `enforcers_present` is `checker_enforcers`. Nothing of your config is sent. |
+| What it answers | `200` with `"decision": "allow"` lets the package start. `200` with `"decision": "deny"` does not, and the answer is kept as a checker's is. |
+| Anything else | A deny, reported as a checker that failed: `unreachable` for a server that cannot be reached, `unexpected_status` for another status, `invalid_answer` for an answer with no decision, `timed_out` for no answer within `checker_timeout_seconds`, `output_too_large` for more than 1 MiB. |
+| Where the address comes from | The load options only, never the package. Naming `checker` and `checker_url` together is refused, and so is `checker_enforcers` without `checker_url`. |
+| What it speaks | `http` only, with no new dependency. Reach a checker on another host through a local address. |
+
+## What a Checker Is Not
+
+- **It is not part of NeMo Fabric.** NeMo Fabric ships no checker, needs none, and knows none by name. Any program that keeps the contract is a checker.
+- **It is not a policy engine in the runtime.** NeMo Fabric evaluates no policy. It pins the policies a package links and reports them. A checker is where they can be read and applied.
+- **It is not a place to call a model.** A decision before a start is made by fixed rules, so the same package and the same policy give the same answer.
+- **It is not a second lock check.** The loader checks the lock and every pin first, and a checker is never asked about a package that failed them. A checker can check more, but it cannot let a refused package start.
+- **It is not a guard for a running agent.** It is asked once, before the start. To stop a running agent, the side that decides calls `Runtime.stop()` or `fabric-agent-ctl stop`.
+- **It is not enforced on a caller who names none.** A checker is asked only by a load that names it. A start with no `checker`, and a start that loads no package, ask nothing. Whoever builds the start command decides that the checker is always named.
+- **It is not confined.** A checker runs as your user, with a small environment and no shell. Name a program you trust, by its full path.
+
+## Print the Start Facts
+
+`agent_package_start_facts` returns the object a checker URL is sent, without starting anything and without asking a checker. Use it to see what a policy will judge before you connect a server:
+
+```python
+from nemo_fabric import agent_package_start_facts
+
+facts = agent_package_start_facts("/sandbox/agent", config, enforcers=["openshell"])
+print(facts["agent_name"], facts["bound_model"], [part["id"] for part in facts["parts"]])
+```
+
+The package is loaded as `load_agent_package` loads it, with the same config and options. A checker option, such as `checker` or `checker_url`, is refused with `package_options_invalid`. `enforcers` is what `checker_enforcers` would send.

@@ -49,6 +49,8 @@ Nothing starts when the package is refused or when the load stops. Each line of 
 | --- | --- |
 | Know what a package holds, which schema versions are read, and how variables and definitions work | [Package Format and Schema Versions](./agent-packages/format-and-versions.mdx) |
 | Load a package in Python or in a sandbox, and choose what a load does with something unsupported | [Load and Start a Package](./agent-packages/load-and-start.mdx) |
+| Decide whether a loaded package may start: a check function, a checker program or a checker URL | [Check a Package Before It Starts](./agent-packages/check-before-start.mdx) |
+| End a running agent and the agents it calls, or watch a URL that says a rule stopped it | [Stop a Run](./agent-packages/stop-a-run.mdx) |
 | Complete a package whose lock pins content from git or an OCI image layout | [Fetch What a Lock Pins](./agent-packages/fetch.mdx) |
 | See how each field lands in the config, including the model and skills | [Map a Package Onto a Config](./agent-packages/map-onto-a-config.mdx) |
 | Handle connectors, plugins, hooks, called agents, custom tools and limits | [Connectors, Plugins, Tools and Bindings](./agent-packages/parts-and-bindings.mdx) |
@@ -61,4 +63,5 @@ Nothing starts when the package is refused or when the load stops. Each line of 
 - **A package can carry a connector, and the mapped config starts it.** Load only a package you trust to run commands. Refer to [Connectors](./agent-packages/parts-and-bindings.mdx#connectors).
 - **The default settings stop many packages.** A package with a policy or a token budget does not load unless you set `if_unsupported="warn"`. Refer to [The Two Settings](./agent-packages/load-and-start.mdx#the-two-settings).
 - **The lock is checked against the folder it sits in.** Pass `expected_lock_sha256` to anchor it to a digest you hold. Refer to [Limits of the Check](./agent-packages/reference.mdx#limits-of-the-check).
+- **A package starts only if you allow it, when you ask.** Name a checker or pass a check function to decide after the load and before the start. Refer to [Check a Package Before It Starts](./agent-packages/check-before-start.mdx).
 - **The loader fetches nothing.** Content from git or an OCI registry that is not in the folder is a separate step. Refer to [Fetch What a Lock Pins](./agent-packages/fetch.mdx).

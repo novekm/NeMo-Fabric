@@ -16,7 +16,7 @@ SPDX-License-Identifier: Apache-2.0
 | `check --agent NAME --runtime-id ID [--live \| --active \| --ready]` | Check the selected runtime through `Fabric.check()` |
 | `start --agent NAME --config FILE [--session-ref FILE]` | `Fabric.start_runtime(config, base_dir=..., session_ref=...)` |
 | `start --agent NAME --request FILE` | Start from one object containing `config` and optional `session_ref` |
-| `start --agent NAME --config FILE --package DIR --report FILE [--package-options FILE]` | Load an agent package with the config, write the load report, then start with the mapped config |
+| `start --agent NAME --config FILE --package DIR --report FILE [--package-options FILE] [--package-checker JSON]` | Load an agent package with the config, write the load report, ask the checker when one is named, then start with the mapped config |
 | `invoke --agent NAME --runtime-id ID --input FILE` | `Runtime.invoke(input=...)` |
 | `invoke --agent NAME --runtime-id ID --request FILE` | `Runtime.invoke(request=RunRequest(...))` |
 | `stop --agent NAME --runtime-id ID` | `Runtime.stop()` |
@@ -80,7 +80,8 @@ fabric-agent-ctl start --agent release-notes-agent \
 | --- | --- |
 | `--package DIR` | Load this package with the config from `--config`, then send the existing start request with the mapped config. Requires `--config` and `--report`. Not allowed with `--request`. |
 | `--report FILE` | Write the load report to this file before the start request is sent. Required with `--package`, and not allowed without it. |
-| `--package-options FILE` | One JSON object with the load options: `entry`, `variables`, `instruction_mode`, `if_unsupported`, `if_unverified`, `check_machine`, `facts`, `expected_lock_sha256` and `bindings`. The schema is `sdk/agent-package-options`. Requires `--package`. |
+| `--package-options FILE` | One JSON object with the load options: `entry`, `variables`, `instruction_mode`, `if_unsupported`, `if_unverified`, `check_machine`, `facts`, `expected_lock_sha256`, `bindings`, `checker` and `checker_timeout_seconds`. The schema is `sdk/agent-package-options`. Requires `--package`. |
+| `--package-checker JSON` | The checker program and its arguments, as one JSON array of text, for example `'["/opt/platform/bin/check-package", "--policy", "/etc/platform/policy"]'`. It is the `checker` member of the options file, given on the command line. A checker named in both places is `invalid_request`. Requires `--package`. |
 
 The options file is one JSON object, for example:
 
@@ -102,13 +103,26 @@ A plugin, a hook or a called agent goes to the adapter under a root key of the m
 
 The package is read and checked in the short-lived command process. The command then sends the same start request the server already accepts. The server and the wire protocol do not change. The check happens once, before the start. The server starts the harness later from the same folders. This is a load-time check. It is not tamper protection for the life of the runtime.
 
-Stdout is unchanged: one response envelope. On success `result` is the runtime handle. When the package is refused, or a required thing stops the load, the response is `validation_failed` at stage `validation`, with `changed: false`, `effects: "none"`, and the package code as the cause, for example `Fabric rejected the configuration. Cause: package_digest_mismatch.` A stopped load has the cause `package_requirements_unmet`. Nothing is sent to the server. No path, value or message is printed.
+Stdout is unchanged: one response envelope. On success `result` is the runtime handle. When the package is refused, a required thing stops the load, or the checker does not allow the start, the response is `validation_failed` at stage `validation`, with `changed: false`, `effects: "none"`, and the package code as the cause, for example `Fabric rejected the configuration. Cause: package_digest_mismatch.` A stopped load has the cause `package_requirements_unmet`. A start the checker denies has the cause `package_check_denied`, and a checker that failed gives `package_check_failed`. Nothing is sent to the server. No path, value or message is printed.
 
 The report file is required because stdout names nothing. With `if_unsupported` set to `warn`, a start goes ahead while the report lists each declared thing that was warned about or left out, such as a hook or a policy. Without the file those would be dropped with nothing said, so `--package` without `--report` is `invalid_request` and the package is not read.
 
-The command loads and starts in one step. With `if_unsupported` set to `warn`, the start request is sent as soon as the report is written, so nothing can read the report in between. To decide before the start, call `load_agent_package` in the sandbox first, read its report, and pass that report's `lock.sha256` as `expected_lock_sha256` in the options file. The command then starts only the package you looked at. Otherwise read the report file after the start, and send `stop` when it lists something you cannot do without.
+The command loads and starts in one step, so nothing outside it can read the report in between. To decide before the start, name a checker: a program that is asked whether the loaded package may start. Give it with `--package-checker`, or as `checker` in the options file with an optional `checker_timeout_seconds`, 30 by default. The list must name a program. An empty list on the flag is `invalid_request`, an empty list in the options file gives the cause `package_options_invalid`, and neither starts anything.
 
-The report file carries the details. It is created or replaced with mode `0600`. It holds the load report without its `config` member; `config_sha256` stays. That file follows the `sdk/agent-package-report` schema. When the load stops, the report lists the declared things that stopped it under `stopped_by`.
+```sh
+fabric-agent-ctl start --agent release-notes-agent \
+  --config /sandbox/config.json --package /sandbox/agent \
+  --report /sandbox/package-report.json \
+  --package-checker '["/opt/platform/bin/check-package", "--policy", "/etc/platform/policy"]'
+```
+
+The checker is asked after the package is loaded and before the start request is sent. It is never asked about a package that is refused or a load that stopped. It is started with no shell, in the working directory of the command, and with the arguments you gave. It gets three environment variables: `NEMO_FABRIC_PACKAGE_DIR` is the package folder, `NEMO_FABRIC_PACKAGE_REPORT` is the path of a private copy of the load report without its `config` member, and `NEMO_FABRIC_AGENT_NAME` is the name of the entry document. Of the command's environment it keeps operating-system variables such as `PATH` and `HOME`, and no other, so no credential held in an environment variable reaches it.
+
+The checker writes one JSON object to standard output. Exit code 0 with `"decision": "allow"` sends the start. Exit code 2 with `"decision": "deny"` does not. Anything else is a deny, reported as a checker that failed: another exit code, output that is not one JSON object, a `decision` that does not fit the exit code, a program that cannot be started, the time limit, or more than 1 MiB written to standard output or to standard error. The report file holds the result under `checker_result`: `decision`, `failure`, `exit_code`, a `detail` text for a failure, and the checker's object as `answer`. A checker that wrote more than 1 MiB has the failure `output_too_large` and no exit code, whether it was ended or had already ended. For a failure, `detail` is why the checker could not be started, that it wrote more than it may, or else the end of what it wrote to standard error. Nothing of it is printed. A start that is not allowed has `outcome: denied`. With no checker named, the command does what it did, and `checker_result` is `null`.
+
+The command runs no check of its own and knows no checker by name. Without a checker, call `load_agent_package` in the sandbox first, read its report, and pass that report's `lock.sha256` as `expected_lock_sha256` in the options file. The command then starts only the package you looked at. Otherwise read the report file after the start, and send `stop` when it lists something you cannot do without.
+
+The report file carries the details. It is created or replaced with mode `0600`. It holds the load report without its `config` member; `config_sha256` stays. That file follows the `sdk/agent-package-report` schema. When the load stops, the report lists the declared things that stopped it under `stopped_by`. When the checker does not allow the start, the report holds its answer under `checker_result`.
 
 When the package is refused, the file is not a load report and does not follow that schema. It holds `{"schema_version": "fabric.agent_package_refusal/v1alpha1", "outcome": "refused", "error": {"code": ..., "subject": ..., "message": ...}}`. Read `outcome` first. If the file cannot be written, the command fails with `invalid_request` and sends nothing. The mapped config must fit the 512 KiB request limit; a larger one gives `request_too_large`.
 

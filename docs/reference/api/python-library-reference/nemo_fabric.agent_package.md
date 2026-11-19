@@ -29,7 +29,11 @@ load_agent_package(
     check_machine: 'bool' = False,
     facts: 'Mapping[str, Any] | None' = None,
     expected_lock_sha256: 'str | None' = None,
-    bindings: 'Mapping[str, str] | None' = None
+    bindings: 'Mapping[str, str] | None' = None,
+    checker: 'Sequence[str] | None' = None,
+    checker_url: 'str | None' = None,
+    checker_enforcers: 'Sequence[str] | None' = None,
+    checker_timeout_seconds: 'float | None' = None
 ) → AgentPackageReport
 ```
 
@@ -41,7 +45,7 @@ Every part is checked against the digest the lock pins. The check happens once, 
 
 The lock sits in the folder it describes, so the check shows that the parts match that lock and no more. Pass ``expected_lock_sha256`` to anchor the lock to a digest held somewhere else, for example in a registry.
 
-The call is synchronous. With ``check_machine=True`` it can take a few seconds; an async caller uses ``asyncio.to_thread``.
+The call is synchronous. With ``check_machine=True`` it can take a few seconds, and with ``checker`` as long as the checker runs; an async caller uses ``asyncio.to_thread``.
 
 
 
@@ -60,12 +64,22 @@ The call is synchronous. With ``check_machine=True`` it can take a few seconds; 
  - <b>`facts`</b>:  Facts the caller knows about the place the agent runs. They  win over probed facts, key by key. The ``packages`` fact lists  the installed software packages by registry, for example
  - <b>```{"pypi"`</b>:  {"faster-whisper": "1.2.1"}}``. The loader compares it with the version the lock pins for each package the agent declares. It looks for no package itself, so a required package of a registry the fact does not name stops a load under ``if_unsupported="stop"``.
  - <b>`expected_lock_sha256`</b>:  The sha256 the caller holds for the lock file,  as 64 lowercase hex characters. A ``sha256`` prefix with its  colon is accepted before them. The load is refused with  ``package_lock_digest_mismatch`` when the lock file in the package  has another digest. A report's ``lock["sha256"]`` is a value to  keep for this.
- - <b>`bindings`</b>:  Targets of your own for the custom tools and the called  agents the package declares, keyed by the place of the declared  thing. A key is ``custom_tools.<name>`` or ``agents.<name>`` for  the agent that runs. For a thing a called agent declares, the  same follows that agent's key, as in  ``agents.<name>.custom_tools.<tool>``. A value is one line of  text that names your target, for example a Python reference or a  registered name. The loader never imports, resolves or runs it.  A bound thing has the status ``bound`` and does not stop the  load. With no binding it stops a load under ``if_unsupported="stop"``.  A key that names nothing the package declares is refused with  ``package_binding_undeclared``. A binding for a called agent  accounts for nothing else that agent declares. Each such thing  has a line of its own in the report. The mapped config does not  hold the bindings. They are in the report.
+ - <b>`bindings`</b>:  Targets of your own for the custom tools and the called  agents the package declares, keyed by the place of the declared  thing. A key is ``custom_tools.<name>`` or ``agents.<name>`` for  the agent that runs. For a thing a called agent declares, the  same follows that agent's key, as in  ``agents.<name>.custom_tools.<tool>``. A key ``limits.max_depth``,  ``limits.max_parallel`` or ``limits.max_total_tokens`` names who  enforces that limit of the agent that runs, which NeMo Fabric  cannot hold; its line keeps the number. A value is one line of  text that names your target, for example a Python reference or a  registered name. The loader never imports, resolves or runs it.  A bound thing has the status ``bound`` and does not stop the  load. With no binding it stops a load under ``if_unsupported="stop"``.  A key that names nothing the package declares is refused with  ``package_binding_undeclared``. A binding for a called agent  accounts for nothing else that agent declares. Each such thing  has a line of its own in the report. The mapped config does not  hold the bindings. They are in the report.
+ - <b>`checker`</b>:  A program that decides whether the loaded package may
+ - <b>`start`</b>:  the program, then its arguments. ``None`` asks no checker, and an empty list is refused. It is asked once, after the package passed its own checks and was mapped, and it is started with no shell. It gets the package folder in ``NEMO_FABRIC_PACKAGE_DIR``, the path of a copy of the load report without its config in ``NEMO_FABRIC_PACKAGE_REPORT`` and the name of the entry document in ``NEMO_FABRIC_AGENT_NAME``. Nothing is added to its arguments. Of your environment it keeps operating-system variables such as ``PATH`` and ``HOME``, and no other. It writes one JSON object to standard output. Exit code 0
+ - <b>`with ``"decision"`</b>:  "allow"`` lets the package start, and exit
+ - <b>`code 2 with ``"decision"`</b>:  "deny"`` does not. Anything else is a deny, reported as a checker that failed. The report holds the answer in ``checker_result``. A load the checker does not allow has the outcome ``denied`` and no config.
+ - <b>`checker_url`</b>:  A checker reached over HTTP in place of a program, such
+ - <b>`as ``http`</b>: //127.0.0.1:8100/v1/hooks/agent-start``. The loader
+ - <b>`posts plain facts about the agent`</b>:  each part with its type, source, version, digest and whether it is local, the models named, and the policies with the enforcers each needs. A ``200``
+ - <b>`answer with ``"decision"`</b>:  "allow"`` lets the package start; a deny, a checker that cannot be reached, another status, or no answer in time does not. Only ``http`` is spoken. Naming it with ``checker`` is refused.
+ - <b>`checker_enforcers`</b>:  The enforcers that run where the agent starts,  sent to ``checker_url``. Refused without ``checker_url``.
+ - <b>`checker_timeout_seconds`</b>:  The time limit of the checker, in seconds.  ``None`` uses 30. A checker that runs longer is ended, and the  load is denied.
 
 
 
 **Returns:**
- An ``AgentPackageReport``. Its ``outcome`` is ``ready``, ``stopped`` or ``verified_only``.
+ An ``AgentPackageReport``. Its ``outcome`` is ``ready``, ``stopped``, ``denied`` or ``verified_only``.
 
 
 
@@ -73,6 +87,31 @@ The call is synchronous. With ``check_machine=True`` it can take a few seconds; 
 
  - <b>`FabricConfigError`</b>:  If the package is refused. ``stage`` is  ``agent_package``, ``code`` is a stable refusal code such as  ``package_digest_mismatch`` and ``details["subject"]`` names the  thing it is about. A mistake in the config itself, such as an  unknown adapter, is raised as ``Fabric.plan`` raises it, with no  stage and no code.
  - <b>`FabricNativeUnavailableError`</b>:  If the native extension is not  installed.
+
+
+---
+
+
+## <kbd>function</kbd> `agent_package_start_facts`
+
+```python
+agent_package_start_facts(
+    package_dir: 'str | PathLike[str]',
+    config: 'FabricConfig | None' = None,
+    enforcers: 'Sequence[str]' = (),
+    **options: 'Any'
+) → dict[str, Any]
+```
+
+The facts NeMo Fabric sends a checker URL about a package, without starting anything.
+
+The package is loaded as ``load_agent_package`` loads it, with the same ``config`` and options, and no checker is asked. The answer is the JSON object ``checker_url`` posts, built by the same code: the agent's name and package digest, each part with its type, source, version, digest and whether it is local, the models named, and the policies with the enforcers each needs. ``enforcers`` is what ``checker_enforcers`` would send.
+
+
+
+**Raises:**
+
+ - <b>`FabricConfigError`</b>:  As ``load_agent_package`` raises it, and with code  ``package_options_invalid`` for a checker option.
 
 
 ---
@@ -296,6 +335,46 @@ Return an immutable view of preserved extension fields.
 ---
 
 
+## <kbd>class</kbd> `AgentPackageCheckerResult`
+
+What the checker of one agent package load answered.
+
+
+
+**Attributes:**
+
+ - <b>`decision`</b>:  ``allow`` or ``deny``. A checker that failed is a ``deny``.
+ - <b>`failure`</b>:  Why the checker counts as failed: ``not_started``,  ``timed_out``, ``output_too_large``, ``unexpected_exit``,  ``invalid_answer``, or for a checker URL ``unreachable`` or  ``unexpected_status``. ``None`` when it answered as it must.
+ - <b>`exit_code`</b>:  The exit code of the checker. ``None`` when it was not  started, ran past the time limit, wrote more than it may, or was  ended by a signal.
+ - <b>`detail`</b>:  More about a failure: why the checker could not be started,  that it wrote more than it may, or else the end of what it wrote  to standard error.
+ - <b>`answer`</b>:  The JSON object the checker wrote. The order of its keys is  not kept, and a number is kept as a JSON number. Each read gives  a plain copy. ``None`` when the checker wrote no single JSON  object, was not started, ran past the time limit or wrote more  than it may.
+
+
+
+### Fields
+
+The mapping exposes the following typed fields:
+
+| Field | Type |
+| --- | --- |
+| `decision` | `str` |
+| `failure` | `str \| None` |
+| `exit_code` | `int \| None` |
+| `detail` | `str \| None` |
+| `answer` | `Mapping[str, Any] \| None` |
+
+---
+
+### <kbd>property</kbd> extra_fields
+
+Return an immutable view of preserved extension fields.
+
+
+
+
+---
+
+
 ## <kbd>class</kbd> `AgentPackageReport`
 
 What one agent package load read, checked and mapped.
@@ -310,7 +389,7 @@ The statuses are valid for this load only. A runtime that is kept for many invoc
  - <b>`format_version`</b>:  Version of the package format that was read.
  - <b>`package_dir`</b>:  The package folder, absolute.
  - <b>`base_dir`</b>:  The base directory that relative config paths resolve against.
- - <b>`outcome`</b>:  ``ready`` when the report holds a config, ``stopped`` when a  required thing stopped the load, ``verified_only`` when no config  was given.
+ - <b>`outcome`</b>:  ``ready`` when the report holds a config, ``stopped`` when a  required thing stopped the load, ``denied`` when the checker did  not allow the start, ``verified_only`` when no config was given.
  - <b>`if_unsupported`</b>:  The setting used for a required thing whose status is  ``not_mapped`` or ``not_met``.
  - <b>`if_unverified`</b>:  The setting used for a required thing whose status is  ``could_not_be_checked``.
  - <b>`stopped_by`</b>:  Ids of the declared things that stopped the load.
@@ -324,7 +403,8 @@ The statuses are valid for this load only. A runtime that is kept for many invoc
  - <b>`digests`</b>:  Every lock entry with its digest, what was checked and the  path the bytes were verified at, as ``AgentPackageDigestCheck``  lines.
  - <b>`notes`</b>:  Things the loader reports that do not stop a load.
  - <b>`config`</b>:  The mapped configuration snapshot. Present only when  ``outcome`` is ``ready``.
- - <b>`config_sha256`</b>:  The sha256 of the mapped config, for drift detection.
+ - <b>`config_sha256`</b>:  The sha256 of the mapped config, for drift detection.  Present when ``outcome`` is ``ready`` or ``denied``.
+ - <b>`checker_result`</b>:  What the checker named by the ``checker`` option  answered, as an ``AgentPackageCheckerResult``, or ``None`` when no  checker was asked.
 
 
 
@@ -353,6 +433,7 @@ The mapping exposes the following typed fields:
 | `notes` | `Sequence[Mapping[str, Any]]` |
 | `config` | `_FabricConfigSnapshot \| None` |
 | `config_sha256` | `str \| None` |
+| `checker_result` | `AgentPackageCheckerResult \| None` |
 
 ---
 
@@ -384,7 +465,7 @@ Use ``base_dir`` of this report as the base directory of that call.
 
 **Raises:**
 
- - <b>`FabricConfigError`</b>:  With code ``package_requirements_unmet`` when a  required thing stopped the load, and with code  ``package_config_required`` when the package was loaded  without a config.
+ - <b>`FabricConfigError`</b>:  With code ``package_requirements_unmet`` when a  required thing stopped the load. With code  ``package_check_denied`` when the checker did not allow the  start, and ``details["answer"]`` holds its answer. With code  ``package_check_failed`` when the checker failed, and  ``details["failure"]`` and ``details["detail"]`` say how.  With code  ``package_config_required`` when the package was loaded  without a config.
 
 
 ---

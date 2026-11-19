@@ -9,7 +9,7 @@ SPDX-License-Identifier: Apache-2.0 */}
 
 A connector is an MCP server. The package says where it lives by its source.
 
-**Carried in the package.** The connector's folder holds `mcp.json`, with one entry under `mcpServers` for each server: `type`, `command`, and optionally `args`, `env` and `cwd`. The loader maps each `stdio` server to an `mcp.servers` entry. The harness then starts that command when the runtime starts, so a package with a carried connector chooses a command that runs on your machine. The loader itself starts nothing. The server starts in its `cwd`, resolved inside the connector's folder. It starts in the connector's folder when `cwd` is left out or is `.`. Strings are passed as written, and nothing is expanded. The server key is the connector's name when the file has one server, and `<connector>-<server>` when it has more.
+**Carried in the package.** The connector's folder holds `mcp.json`, with one entry under `mcpServers` for each server: `type`, `command`, and optionally `args`, `env` and `cwd`. The loader maps each `stdio` server to an `mcp.servers` entry. The harness then starts that command when the runtime starts, so a package with a carried connector chooses a command that runs on your machine. The loader itself starts nothing a package names. The server starts in its `cwd`, resolved inside the connector's folder. It starts in the connector's folder when `cwd` is left out or is `.`. Strings are passed as written, and nothing is expanded. The server key is the connector's name when the file has one server, and `<connector>-<server>` when it has more.
 
 The loader reads those five keys and no others. Any other key of a server entry, such as `disabled` or `timeout`, has no effect. The connector's line names each such key in its `detail`, and the report has a note with the code `connector_key_not_read`.
 
@@ -196,6 +196,7 @@ A key is the place of the declared thing:
 | `agents.<name>` | An agent the agent that runs calls. |
 | `agents.<name>.custom_tools.<tool>` | A custom tool of that called agent. |
 | `agents.<name>.agents.<other>` | An agent that called agent calls. The same pattern goes on at every depth. |
+| `limits.max_depth`, `limits.max_parallel`, `limits.max_total_tokens` | A limit of the agent that runs that NeMo Fabric cannot hold. The value names who enforces it, such as the harness or a model gateway. The line is `bound`, its detail keeps the number, and the load does not stop for it. |
 
 A key is the same whether the agent or its definition states the thing. A value is one line of text, from 1 to 1024 bytes. It can be a Python reference, a registered name, or any text your application reads. The loader keeps it as you wrote it. A key or a value with a control character, a line or paragraph separator, or a format character that hides text or reverses its direction is refused, and so is a key over 1024 bytes.
 
@@ -211,7 +212,7 @@ The loader looks at bindings after it has checked the documents, the lock and ev
 - **A key that names nothing the package declares is refused** with `package_binding_undeclared`. The subject is `bindings.<key>`.
 - **A called agent with no document in the package is not bound.** For an agent pinned from git whose content is not in the package, the line stays `not_mapped` with the gap `content_absent`, and the `detail` says the binding was not applied. An agent pinned by an artifact digest has the gap `content_not_verifiable`. A called agent that could not be started is not bound either: its line stays `not_mapped`, and a note says why it could not start.
 - **A running agent follows the rule for a running connector.** An agent with an `a2a::` source and a binding has the status `could_not_be_checked` and your target in `bound_to`, because nothing compared it with the version and the card the lock pins. It follows `if_unverified`.
-- **A binding changes nothing else.** It applies to custom tools and called agents only. A key for anything else, such as a hook, a policy or a need, is refused with `package_options_invalid`. No binding gives another line a better status: no need, pin, limit or policy is accounted for by one.
+- **A binding changes nothing else.** It applies to custom tools, called agents and the three limits `max_depth`, `max_parallel` and `max_total_tokens` of the agent that runs. A key for anything else, such as a hook, a policy, a need or another limit, is refused with `package_options_invalid`. No binding gives another line a better status: no need, pin or policy is accounted for by one.
 - **A timeout bounds one NeMo Fabric invocation.** With no called agent bound, one invocation is the whole tree, and the `limits.timeout_seconds` line says so. After you bind a called agent, the line says that a run of that agent outside the invocation is yours to bound.
 - **An optional called agent needs no binding.** It never stops a load, and neither does anything it declares: no line below it is required, with or without a binding. A custom tool has no `optional` member in the format, so a custom tool of the agent that runs is always required.
 

@@ -11,7 +11,7 @@ SPDX-License-Identifier: Apache-2.0 */}
 
 | Member | What it holds |
 | --- | --- |
-| `outcome` | `ready`, `stopped` or `verified_only`. |
+| `outcome` | `ready`, `stopped`, `denied` or `verified_only`. |
 | `stopped_by` | The ids of the declared things that stopped the load. |
 | `entry`, `agent` | The entry document and the agent that runs: kind, name, lock address, path and digest. |
 | `lock` | The lock file: path, SHA-256, generator and entry count. |
@@ -21,7 +21,8 @@ SPDX-License-Identifier: Apache-2.0 */}
 | `declared` | Every declared thing with its status. |
 | `digests` | Every lock entry with what was checked. |
 | `notes` | Things that did not stop the load. Each has a `code`, a `subject` and a `text`. The codes are `limit_lowered`, `local_version_ignored`, `retracted`, `entry_kept_once`, `source_not_compared`, `connector_key_not_read` and `called_agent_cannot_start`. |
-| `config`, `config_sha256` | The mapped config and a SHA-256 of it. Present when the outcome is `ready`. |
+| `config`, `config_sha256` | The mapped config and a SHA-256 of it. Present when the outcome is `ready`. A `denied` report keeps the SHA-256 and has no config. |
+| `checker_result` | What the checker answered, when the options name one and the load got that far: `decision`, `failure`, `exit_code`, `detail` and the checker's `answer`. Refer to [Ask a Checker Program](./check-before-start.mdx#ask-a-checker-program). |
 
 A line of `declared` has an `id` made of the stating document and a JSON Pointer into it, such as `agent:/skills/release-notes` or `definition:/limits/max_turns`. It also has `kind`, `field`, `name`, `required`, `status`, `gap`, `effect`, `mapped_to`, `bound_to`, the author's `reason` and the loader's `detail`.
 
@@ -90,6 +91,7 @@ except FabricConfigError as error:
 | `package_fetch_failed` | Raised by a fetch: `git` could not be run or could not fetch, the repository does not have the pinned commit or the folder, a fetched folder holds two names that are one file on this file system, or the layout folder does not hold the pinned artifact. |
 | `package_out_dir_in_use` | Raised by a fetch: `out_dir` holds something, is inside the package folder, or cannot be made. |
 | `package_config_required`, `package_requirements_unmet` | Raised by `to_config()` when no config was given, or when the load stopped. |
+| `package_check_denied`, `package_check_failed` | Raised by `to_config()` and by `Fabric.start_agent_package` when the checker or the check did not allow the start, or when the checker failed or the check raised. |
 
 An error from the config itself, such as an unknown adapter, is not a package refusal. It is raised as `FabricConfigError` with the planner's message, as `Fabric.plan` raises it: it has no stage, no code and no subject.
 
@@ -131,9 +133,9 @@ The loader does not do the following. Each one is reported, never dropped.
 | Supplying or registering custom tools. | The loader keeps your `tools.definitions` entry, or the line is `bound` when you give a binding. It writes no definition, and it does not import, resolve or run a target. |
 | Writing bindings into the mapped config. | The bindings are in the report's `declared` lines only. |
 | Starting a runtime from a package in a remote environment through the SDK. | Not done. `Fabric.start_runtime_in` takes a config. Refer to [Load a Package in a Sandbox](./load-and-start.mdx#load-a-package-in-a-sandbox). |
-| Evaluating policies. | `not_mapped`. A policy is never reported as evaluated. |
+| Evaluating policies. | `not_mapped`. A policy is never reported as evaluated. A checker you name can read and apply them before the start. |
 | Installing `packages`, or probing for them. | The line has the status the `packages` fact gives it, and it is `not_mapped` with no fact about its registry. The lock pin is in `digests`. |
-| Enforcing `max_parallel`, `max_depth` and `max_total_tokens`. | `not_mapped`. The line names the component that enforces the limit. |
+| Enforcing `max_parallel`, `max_depth` and `max_total_tokens`. | `not_mapped`. The line names the component that enforces the limit. A binding `limits.<name>` names who does, and the line is `bound`. |
 | Comparing a running connector or agent with its pin. | `could_not_be_checked`. |
 | Writing a model entry for the agent's default model. | The loader only selects an entry your config offers under that name. A config that holds no model has `model.source` as `not_mapped` with the gap `model_not_configured`. |
 | Reporting the model each run used. | The report says what was configured. |

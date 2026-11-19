@@ -18,6 +18,10 @@ use super::model::{CalledAgent, PackageReading};
 pub(super) const CUSTOM_TOOLS: &str = "custom_tools";
 /// The field of called agents, in a document and in a binding key.
 pub(super) const AGENTS: &str = "agents";
+pub(super) const LIMITS: &str = "limits";
+/// The limits a binding can name: the ones NeMo Fabric cannot hold itself, which bound the agent and every agent
+/// it calls. The binding names who enforces each, so a load does not stop for them and they are not dropped.
+pub(super) const BINDABLE_LIMITS: [&str; 3] = ["max_depth", "max_parallel", "max_total_tokens"];
 
 /// The longest key and the longest target, in bytes.
 const MAX_BYTES: usize = 1024;
@@ -79,6 +83,13 @@ struct Named<'a> {
 fn parse_key(key: &str) -> Option<Named<'_>> {
     let mut place = Vec::new();
     let mut rest = key;
+    if let Some(name) = key.strip_prefix("limits.") {
+        return BINDABLE_LIMITS.contains(&name).then_some(Named {
+            place,
+            field: LIMITS,
+            name,
+        });
+    }
     loop {
         if let Some(name) = rest.strip_prefix("custom_tools.") {
             return (!name.is_empty()).then_some(Named {
@@ -138,7 +149,7 @@ pub(super) fn check_bindings(
         }
         let Some(named) = parse_key(key) else {
             return Err(invalid(
-                "a binding key is `custom_tools.<name>` or `agents.<name>`, alone or after the key of a called agent. A binding applies to custom tools and called agents only"
+                "a binding key is `custom_tools.<name>` or `agents.<name>`, alone or after the key of a called agent, or `limits.max_depth`, `limits.max_parallel` or `limits.max_total_tokens`. A binding applies to custom tools, called agents and those limits only"
                     .to_string(),
             ));
         };
@@ -167,10 +178,10 @@ pub(super) fn check_bindings(
             }
         }
         if !declares(reading, called, named.field, named.name) {
-            let kind = if named.field == AGENTS {
-                "called agent"
-            } else {
-                "custom tool"
+            let kind = match named.field {
+                AGENTS => "called agent",
+                LIMITS => "limit",
+                _ => "custom tool",
             };
             return Err(undeclared(format!(
                 "the package declares no {kind} at `{key}`"

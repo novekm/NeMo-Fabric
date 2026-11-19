@@ -88,6 +88,36 @@
           "auto"
         ],
         "description": "Claude permission handling mode."
+      },
+      "nemo_guardrails": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "pattern": "^https?://",
+            "description": "The NeMo Guardrails hooks server, such as http://127.0.0.1:8100."
+          },
+          "agent_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The agent's name in the x-nemo-agent-name header. start_agent_package sets it to the package's name."
+          },
+          "agent_digest": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The agent package's digest in the x-nemo-agent-digest header. start_agent_package sets it to the sha256 of the lock."
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "How long a check may take before the call is denied. Default 30."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false,
+        "description": "Ask a NeMo Guardrails hooks server about every tool call, naming the run and the agent."
       }
     },
     "required": [],

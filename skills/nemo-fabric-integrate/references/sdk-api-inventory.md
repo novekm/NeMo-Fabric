@@ -26,7 +26,7 @@ The following table lists the `Fabric` methods and when to use each:
 | `doctor(config, *, base_dir=...)` | Yes | You need preflight diagnostics for adapter resolution, capability routing, declared requirements, and environment assumptions. | `DoctorReport` |
 | `run(config, *, base_dir=..., input=... \| request=...)` | Yes | You need one complete start, invoke, result, and stop cycle. | `RunResult` |
 | `start_runtime(config, *, base_dir=..., overrides=..., streaming=False, launch_collector=None, completion_wait_timeout=1.0)` | Yes | You need state across multiple ordered invocations. Pass `streaming=True` with NVIDIA NeMo Relay enabled only to provision `invoke_stream(...)`. | `Runtime` |
-| `start_agent_package(package_dir, config, *, base_dir=..., options=..., session_ref=..., overrides=..., streaming=False)` | Yes | You need a runtime started from an agent package in one call. `options` holds the `load_agent_package` options by name. | `Runtime`, with the load report as `agent_package_report` |
+| `start_agent_package(package_dir, config, *, base_dir=..., options=..., check=..., session_ref=..., overrides=..., streaming=False)` | Yes | You need a runtime started from an agent package in one call. `options` holds the `load_agent_package` options by name. A `check` callable gets the load report, and the start goes ahead only when it returns a mapping whose `decision` is `"allow"`. A `checker` program named in `options` is asked first. | `Runtime`, with the load report as `agent_package_report` |
 | `prepare_environment(config, *, base_dir=...)` | Yes | Prepare an environment independently of a runtime; preparation depends on provider support. | `EnvironmentHandle` |
 | `attach_environment(config, reference, *, base_dir=...)` | Yes | Verify a caller-owned resource with a typed `EnvironmentReference` when the provider supports attachment. | `EnvironmentHandle` |
 | `start_runtime_in(config, environment, *, base_dir=..., overrides=..., streaming=False)` | Yes | Start a runtime in a typed environment when the selected runtime provider supports it. | `Runtime` |
@@ -48,7 +48,7 @@ The profile is configuration-dependent for telemetry. Registered workflows
 require target metadata and bind both descriptors in the fingerprint; attached
 services require separate admission. The profile is not observed execution provenance.
 
-The public `load_agent_package(package_dir, config=None, *, base_dir=..., entry=..., variables=..., instruction_mode=..., if_unsupported="stop", if_unverified="warn", check_machine=False, facts=..., expected_lock_sha256=..., bindings=...)`
+The public `load_agent_package(package_dir, config=None, *, base_dir=..., entry=..., variables=..., instruction_mode=..., if_unsupported="stop", if_unverified="warn", check_machine=False, facts=..., expected_lock_sha256=..., bindings=..., checker=..., checker_timeout_seconds=...)`
 function is synchronous. It reads an agent package, checks every part against
 the package's lock, and returns an immutable `AgentPackageReport`. With a
 config, `report.to_config()` returns the mapped `FabricConfig` when
@@ -69,7 +69,15 @@ for the custom tools your application supplies and the called agents it runs:
 a key is `custom_tools.<name>` or `agents.<name>`, a value is one line of text
 that names your target, and the loader never imports or runs it. A bound thing
 is a `report.declared` line with status `bound` and the target in `bound_to`;
-the mapped config does not hold the bindings. See the
+the mapped config does not hold the bindings. Pass `checker` to have a program
+decide whether the loaded package may start: the program, then its arguments.
+It is started with no shell, gets the package folder, the path of the load
+report file and the agent name in `NEMO_FABRIC_PACKAGE_DIR`,
+`NEMO_FABRIC_PACKAGE_REPORT` and `NEMO_FABRIC_AGENT_NAME`, and answers with
+one JSON object and exit code 0 for `"decision": "allow"` or 2 for
+`"decision": "deny"`. Anything else is a deny. `report.checker_result` holds
+the answer, and a load that is not allowed has `report.outcome == "denied"` and
+no config. An empty `checker` list is refused. See the
 [agent packages guide](https://github.com/NVIDIA/NeMo-Fabric/blob/main/docs/sdk/agent-packages.mdx).
 
 The public `fetch_agent_package(package_dir, out_dir, *, entry=..., expected_lock_sha256=..., oci_layout=...)`

@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use super::adapter::{AdapterSupport, adapter_support, harness_names};
 use super::bindings::check_bindings;
+use super::checker::Checker;
 use super::error::PackageError;
 use super::facts::{overlay_facts, probe_facts};
 use super::mapping::{map_package, unmapped_items, unmapped_model};
@@ -17,8 +18,8 @@ use super::needs::need_lines;
 use super::options::AgentPackageOptions;
 use super::reader::read_package;
 use super::report::{
-    AdapterReport, AgentPackageReport, PackageOutcome, REPORT_SCHEMA_VERSION, apply_actions,
-    config_sha256, digest_checks,
+    AdapterReport, AgentPackageReport, CheckerDecision, PackageOutcome, REPORT_SCHEMA_VERSION,
+    apply_actions, config_sha256, digest_checks,
 };
 use super::schemas::format_version;
 use crate::config::{
@@ -52,6 +53,12 @@ impl From<PackageError> for FabricError {
 /// A load that the `if_unsupported` or `if_unverified` option stops is not an error:
 /// the report has outcome `stopped` and no config.
 ///
+/// With the `checker` option, a program the caller names is asked whether the
+/// loaded package may start. It is asked once, last, and only about a load
+/// that is ready. A load it does not allow is not an error either: the report
+/// has outcome `denied`, no config, and the checker's answer under
+/// `checker_result`.
+///
 /// The check happens once, at load time. It does not protect the files for
 /// the life of a runtime.
 pub fn load_agent_package(
@@ -81,6 +88,7 @@ pub fn load_agent_package_with_adapter_directories(
             source,
         }
     })?;
+    let checker = Checker::from_options(&options)?;
 
     // The package, the entry document, the lock and the variables.
     let reading = read_package(
@@ -139,6 +147,7 @@ pub fn load_agent_package_with_adapter_directories(
             .collect(),
         config: None,
         config_sha256: None,
+        checker_result: None,
     };
 
     let (Some(config), Some(support)) = (config, support) else {
@@ -175,7 +184,17 @@ pub fn load_agent_package_with_adapter_directories(
     report.notes.extend(mapped.notes);
     if outcome == PackageOutcome::Ready {
         report.config_sha256 = Some(config_sha256(&mapped.config)?);
-        report.config = Some(mapped.config);
+        // The checker is asked last, and only about a package that can start.
+        if let Some(checker) = checker {
+            let result = checker.ask(&report);
+            if result.decision == CheckerDecision::Deny {
+                report.outcome = PackageOutcome::Denied;
+            }
+            report.checker_result = Some(result);
+        }
+        if report.outcome == PackageOutcome::Ready {
+            report.config = Some(mapped.config);
+        }
     }
     Ok(report)
 }

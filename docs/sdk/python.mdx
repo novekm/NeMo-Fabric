@@ -196,7 +196,7 @@ report = load_agent_package("/sandbox/agent", config, base_dir="/sandbox")
 runtime = await Fabric().start_runtime(report.to_config(), base_dir=report.base_dir)
 ```
 
-`Fabric.start_agent_package(package_dir, config)` does both steps in one call and returns the active `Runtime`. The runtime holds the load report as `runtime.agent_package_report`. The `options` argument holds the load options by name.
+`Fabric.start_agent_package(package_dir, config)` does both steps in one call and returns the active `Runtime`. The runtime holds the load report as `runtime.agent_package_report`. The `options` argument holds the load options by name. Its optional `check` argument is a function that gets the load report and decides whether the package may start: the start goes ahead only when the function returns a mapping whose `decision` is `allow`. The `checker` option names a program that is asked the same question, by the same rule, in every place that loads a package.
 
 ```python
 async with await Fabric().start_agent_package(

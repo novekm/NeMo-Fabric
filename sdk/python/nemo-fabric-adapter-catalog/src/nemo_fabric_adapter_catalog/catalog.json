@@ -256,6 +256,36 @@
               "minimum": 1,
               "type": "integer"
             },
+            "nemo_guardrails": {
+              "additionalProperties": false,
+              "description": "Ask a NeMo Guardrails hooks server about every tool call, naming the run and the agent.",
+              "properties": {
+                "agent_digest": {
+                  "description": "The agent package's digest in the x-nemo-agent-digest header. start_agent_package sets it to the sha256 of the lock.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "agent_name": {
+                  "description": "The agent's name in the x-nemo-agent-name header. start_agent_package sets it to the package's name.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "timeout_seconds": {
+                  "description": "How long a check may take before the call is denied. Default 30.",
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "url": {
+                  "description": "The NeMo Guardrails hooks server, such as http://127.0.0.1:8100.",
+                  "pattern": "^https?://",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "type": "object"
+            },
             "permission_mode": {
               "description": "Claude permission handling mode.",
               "enum": [
@@ -317,7 +347,7 @@
         "name": "nemo-fabric-adapters-claude",
         "version": "0.8.0"
       },
-      "sha256": "c27278420572a1f8439d761b71fdf04e3155f7a8fa08a1dac1908e88cf5789ae",
+      "sha256": "8ff3fd9acee08a4b1d4df12314b318ccaea66da9a0aff52015b0a41555fa544d",
       "source": "adapters/python/claude/claude.fabric-adapter.json"
     },
     "nvidia.fabric.cline": {

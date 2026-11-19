@@ -43,7 +43,7 @@ A `software` fact lists every program on the machine. A program you leave out is
 
 The probe reads no interface, family or model of a GPU. A GPU need that names one of those is `could_not_be_checked` unless you pass the `gpus` fact with those members. A GPU fact with no `interface` member is no fact about interfaces: it never makes a need `not_met`.
 
-The loader never runs a program because a document names it. It runs only version commands from its own fixed list. A program that is on `PATH` and not on that list is `could_not_be_checked`. So is a program whose name holds a path separator, because only a bare name is looked up.
+The loader never runs a program because a document names it. For facts about the machine it runs only version commands from its own fixed list. A program that is on `PATH` and not on that list is `could_not_be_checked`. So is a program whose name holds a path separator, because only a bare name is looked up.
 
 With neither a fact nor a probe, a need is `could_not_be_checked`. The network reach is never probed: pass the reach your platform allows as the `network` fact. An agent that is allowed less reach than it asks for has a need that is `not_met`.
 

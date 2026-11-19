@@ -1868,6 +1868,192 @@ pub fn stop_runtime(plan: &RunPlan, runtime: &RuntimeHandle) -> Result<Vec<Fabri
     })
 }
 
+/// Why a running agent is stopped, and who asked. A stop with no
+/// `violation` is a kill switch: someone outside the run ended it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StopRequest {
+    /// Why the run ends, as a person reads it in the record. Not blank.
+    pub reason: String,
+    /// Who asked, such as `nemo-guardrails` or an operator's name. Not blank.
+    pub requested_by: String,
+    /// The decision that asked for the stop, as the rule that made it wrote
+    /// it, such as a NeMo Guardrails stop answer. Left out for a stop that no
+    /// rule asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub violation: Option<Value>,
+    /// Whether the stop is a quarantine: the agent may not start again until
+    /// someone releases it. The run stops the same way; the quarantine itself
+    /// is kept by the checker that refuses later starts, such as the NeMo
+    /// Guardrails hooks server.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub quarantine: bool,
+}
+
+/// The runtime of an agent the lead calls, started apart from the lead,
+/// which stops with it. An agent the lead's harness runs itself ends with
+/// the lead's runtime and is not named here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CalledRuntime {
+    /// The plan the called agent's runtime was started from.
+    pub plan: RunPlan,
+    /// The called agent's runtime.
+    pub runtime: RuntimeHandle,
+}
+
+/// What a stop did to one runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StopRole {
+    /// The runtime the stop was asked for.
+    Lead,
+    /// The runtime of an agent the lead calls.
+    Called,
+}
+
+/// One runtime a stop reached.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StoppedRuntime {
+    /// Runtime handle id.
+    pub runtime_id: String,
+    /// Agent name.
+    pub agent_name: String,
+    /// The lead, or an agent it calls.
+    pub role: StopRole,
+    /// Whether `stop_runtime` returned without an error.
+    pub stopped: bool,
+    /// The error `stop_runtime` returned, when it returned one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// The record of one stop: who asked, why, and what it reached.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StopRecord {
+    /// Stop id.
+    pub stop_id: String,
+    /// Unix timestamp in milliseconds.
+    pub timestamp_millis: u128,
+    /// Why the run ended.
+    pub reason: String,
+    /// Who asked.
+    pub requested_by: String,
+    /// The decision that asked for the stop. None for a kill switch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub violation: Option<Value>,
+    /// Whether the stop is a quarantine.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub quarantine: bool,
+    /// The lead first, then each called agent, in the order given.
+    pub runtimes: Vec<StoppedRuntime>,
+    /// The events of each `stop_runtime`, then the `runtime.stop_requested` event.
+    pub events: Vec<FabricEvent>,
+}
+
+/// The kind of the event a stop adds to its record.
+pub const STOP_REQUESTED_EVENT: &str = "runtime.stop_requested";
+/// The most stop records the process keeps; the oldest goes first.
+const MAX_STOP_RECORDS: usize = 128;
+
+static STOP_RECORDS: LazyLock<Mutex<Vec<StopRecord>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// Stop a running agent for a reason, with the agents it calls.
+///
+/// This is `stop_runtime` with a reason and who asked, for a rule that ends
+/// a run or for a kill switch with no rule behind it. The lead stops first,
+/// so it starts no new call, then each called agent's runtime. A runtime
+/// that fails to stop does not keep the others running: each outcome is in
+/// the record. The record is returned, kept in the process (see
+/// [`stop_records`]) and ends with a `runtime.stop_requested` event. A blank
+/// reason or requester is refused before anything stops.
+pub fn stop_runtime_for(
+    plan: &RunPlan,
+    runtime: &RuntimeHandle,
+    called: &[CalledRuntime],
+    request: &StopRequest,
+) -> Result<StopRecord> {
+    for (field, value) in [
+        ("stop.reason", &request.reason),
+        ("stop.requested_by", &request.requested_by),
+    ] {
+        if value.trim().is_empty() {
+            return Err(FabricError::InvalidConfig {
+                field: field.to_string(),
+                reason: "a stop must say why and who asked".to_string(),
+            });
+        }
+    }
+    let mut runtimes = Vec::new();
+    let mut events = Vec::new();
+    let targets = std::iter::once((StopRole::Lead, plan, runtime)).chain(
+        called
+            .iter()
+            .map(|called| (StopRole::Called, &called.plan, &called.runtime)),
+    );
+    for (role, plan, runtime) in targets {
+        let outcome = stop_runtime(plan, runtime);
+        let error = outcome.as_ref().err().map(ToString::to_string);
+        if let Ok(stopped) = outcome {
+            events.extend(stopped);
+        }
+        runtimes.push(StoppedRuntime {
+            runtime_id: runtime.runtime_id.clone(),
+            agent_name: runtime.agent_name.clone(),
+            role,
+            stopped: error.is_none(),
+            error,
+        });
+    }
+    let stop_id = new_id("stop");
+    let mut metadata = BTreeMap::new();
+    metadata.insert("stop_id".to_string(), Value::String(stop_id.clone()));
+    metadata.insert(
+        "requested_by".to_string(),
+        Value::String(request.requested_by.clone()),
+    );
+    if let Some(violation) = &request.violation {
+        metadata.insert("violation".to_string(), violation.clone());
+    }
+    if request.quarantine {
+        metadata.insert("quarantine".to_string(), Value::Bool(true));
+    }
+    metadata.insert(
+        "runtimes".to_string(),
+        serde_json::to_value(&runtimes).map_err(FabricError::SerializeJson)?,
+    );
+    events.push(event_with_metadata(
+        STOP_REQUESTED_EVENT,
+        request.reason.clone(),
+        metadata,
+    ));
+    let record = StopRecord {
+        stop_id,
+        timestamp_millis: now_millis(),
+        reason: request.reason.clone(),
+        requested_by: request.requested_by.clone(),
+        violation: request.violation.clone(),
+        quarantine: request.quarantine,
+        runtimes,
+        events,
+    };
+    let mut records = STOP_RECORDS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if records.len() == MAX_STOP_RECORDS {
+        records.remove(0);
+    }
+    records.push(record.clone());
+    Ok(record)
+}
+
+/// The stops this process recorded, oldest first, at most 128.
+pub fn stop_records() -> Vec<StopRecord> {
+    STOP_RECORDS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
 fn uses_local_host(plan: &RunPlan) -> bool {
     matches!(
         adapter_kind(plan),
@@ -6711,6 +6897,192 @@ else:
                 matches!(outcome, Err(FabricError::AdapterLifecycleOperation {code, ..}) if code == "host_unavailable")
             );
         }
+    }
+
+    fn stop_request(violation: Option<Value>) -> StopRequest {
+        StopRequest {
+            reason: "tool call 'drop_database' is a stop tool".to_string(),
+            requested_by: "nemo-guardrails".to_string(),
+            violation,
+            quarantine: false,
+        }
+    }
+
+    #[test]
+    fn a_stop_for_a_rule_stops_the_lead_and_its_called_agents_and_records_it() {
+        let (lead_root, lead_plan) = local_host_plan("success");
+        let (first_root, first_plan) = local_host_plan("success");
+        let (second_root, second_plan) = local_host_plan("success");
+        let lead = start_runtime(&lead_plan).unwrap();
+        let called = vec![
+            CalledRuntime {
+                runtime: start_runtime(&first_plan).unwrap(),
+                plan: first_plan,
+            },
+            CalledRuntime {
+                runtime: start_runtime(&second_plan).unwrap(),
+                plan: second_plan,
+            },
+        ];
+        let violation = serde_json::json!({"decision": "stop", "reason": "tool call 'drop_database' is a stop tool"});
+
+        let record = stop_runtime_for(
+            &lead_plan,
+            &lead,
+            &called,
+            &stop_request(Some(violation.clone())),
+        )
+        .unwrap();
+
+        for root in [lead_root, first_root, second_root] {
+            fs::remove_dir_all(root).unwrap();
+        }
+        let roles: Vec<_> = record
+            .runtimes
+            .iter()
+            .map(|stopped| (stopped.runtime_id.clone(), stopped.role, stopped.stopped))
+            .collect();
+        assert_eq!(
+            roles,
+            vec![
+                (lead.runtime_id.clone(), StopRole::Lead, true),
+                (called[0].runtime.runtime_id.clone(), StopRole::Called, true),
+                (called[1].runtime.runtime_id.clone(), StopRole::Called, true),
+            ]
+        );
+        for runtime in std::iter::once(&lead).chain(called.iter().map(|called| &called.runtime)) {
+            assert!(!local_hosts().contains_key(&runtime.runtime_id));
+        }
+        assert_eq!(record.requested_by, "nemo-guardrails");
+        assert_eq!(record.violation, Some(violation.clone()));
+        let event = record.events.last().unwrap();
+        assert_eq!(event.kind, STOP_REQUESTED_EVENT);
+        assert_eq!(event.message, record.reason);
+        assert_eq!(event.metadata["violation"], violation);
+        assert_eq!(
+            event.metadata["stop_id"],
+            Value::String(record.stop_id.clone())
+        );
+        assert!(stop_records().contains(&record));
+    }
+
+    #[test]
+    fn a_kill_switch_stops_a_running_agent_with_no_violation() {
+        let (root, plan) = local_host_plan("success");
+        let runtime = start_runtime(&plan).unwrap();
+        let request = StopRequest {
+            reason: "the operator ended the run".to_string(),
+            requested_by: "operator".to_string(),
+            violation: None,
+            quarantine: false,
+        };
+
+        let record = stop_runtime_for(&plan, &runtime, &[], &request).unwrap();
+
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(record.runtimes.len(), 1);
+        assert!(record.runtimes[0].stopped);
+        assert_eq!(record.violation, None);
+        assert!(
+            !record
+                .events
+                .last()
+                .unwrap()
+                .metadata
+                .contains_key("violation")
+        );
+        assert!(!local_hosts().contains_key(&runtime.runtime_id));
+    }
+
+    #[test]
+    fn a_quarantine_stops_the_run_through_the_same_trigger_and_is_recorded() {
+        let (root, plan) = local_host_plan("success");
+        let runtime = start_runtime(&plan).unwrap();
+        let request = StopRequest {
+            reason: "agent 'release-reviewer' is quarantined: under review".to_string(),
+            requested_by: "platform".to_string(),
+            violation: None,
+            quarantine: true,
+        };
+
+        let record = stop_runtime_for(&plan, &runtime, &[], &request).unwrap();
+
+        fs::remove_dir_all(root).unwrap();
+        assert!(record.quarantine);
+        assert!(record.runtimes[0].stopped);
+        assert!(!local_hosts().contains_key(&runtime.runtime_id));
+        assert_eq!(
+            record.events.last().unwrap().metadata["quarantine"],
+            Value::Bool(true)
+        );
+        assert_eq!(
+            serde_json::to_value(&record).unwrap()["quarantine"],
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn a_stop_that_does_not_say_why_or_who_asked_stops_nothing() {
+        let (root, plan) = local_host_plan("success");
+        let runtime = start_runtime(&plan).unwrap();
+        for (reason, requested_by, field) in [
+            (" ", "operator", "stop.reason"),
+            ("the operator ended the run", "", "stop.requested_by"),
+        ] {
+            let request = StopRequest {
+                reason: reason.to_string(),
+                requested_by: requested_by.to_string(),
+                violation: None,
+                quarantine: false,
+            };
+            let refused = stop_runtime_for(&plan, &runtime, &[], &request);
+            assert!(
+                matches!(refused, Err(FabricError::InvalidConfig { field: ref named, .. }) if named == field)
+            );
+        }
+        assert!(local_hosts().contains_key(&runtime.runtime_id));
+        stop_runtime(&plan, &runtime).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_called_agent_that_fails_to_stop_does_not_keep_the_others_running() {
+        let (lead_root, lead_plan) = local_host_plan("success");
+        let (called_root, called_plan) = local_host_plan("success");
+        let lead = start_runtime(&lead_plan).unwrap();
+        let running = start_runtime(&called_plan).unwrap();
+        // A handle that does not belong to its plan: stop_runtime refuses it.
+        let mut stranger = running.clone();
+        stranger.runtime_binding = "not-this-plan".to_string();
+        let called = vec![
+            CalledRuntime {
+                plan: called_plan.clone(),
+                runtime: stranger,
+            },
+            CalledRuntime {
+                plan: called_plan.clone(),
+                runtime: running.clone(),
+            },
+        ];
+
+        let record = stop_runtime_for(&lead_plan, &lead, &called, &stop_request(None)).unwrap();
+
+        fs::remove_dir_all(lead_root).unwrap();
+        fs::remove_dir_all(called_root).unwrap();
+        let outcomes: Vec<_> = record
+            .runtimes
+            .iter()
+            .map(|stopped| (stopped.role, stopped.stopped, stopped.error.is_some()))
+            .collect();
+        assert_eq!(
+            outcomes,
+            vec![
+                (StopRole::Lead, true, false),
+                (StopRole::Called, false, true),
+                (StopRole::Called, true, false),
+            ]
+        );
+        assert!(!local_hosts().contains_key(&running.runtime_id));
     }
 
     #[test]
