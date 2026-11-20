@@ -11,7 +11,15 @@ import {
   type AdapterStartInput,
 } from "nemo-fabric-adapters-common";
 
+export interface GuardrailsSetting {
+  url: string;
+  agentName?: string;
+  agentDigest?: string;
+  timeoutSeconds?: number;
+}
+
 export interface KiroSettings {
+  guardrails?: GuardrailsSetting;
   modeId?: string;
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
   permissionMode: "deny" | "allow_once";
@@ -41,10 +49,37 @@ export function selectSettings(config: AgentConfig): KiroSettings {
   if (permissionMode !== "deny" && permissionMode !== "allow_once") {
     throw new LifecycleError("kiro_settings_invalid", "Kiro permission_mode is not supported");
   }
+  const guardrails = selectGuardrails(value.nemo_guardrails);
   return {
+    ...(guardrails === undefined ? {} : { guardrails }),
     ...(modeId === undefined ? {} : { modeId: modeId as string }),
     ...(effort === undefined ? {} : { effort: effort as KiroSettings["effort"] }),
     permissionMode,
+  };
+}
+
+function selectGuardrails(value: unknown): GuardrailsSetting | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value) || typeof value.url !== "string" || !/^https?:\/\//u.test(value.url)) {
+    throw new LifecycleError("kiro_settings_invalid", "Kiro nemo_guardrails needs an http(s) url");
+  }
+  const text = (name: string): string | undefined => {
+    const item = value[name];
+    if (item === undefined || item === null || item === "") return undefined;
+    if (typeof item !== "string") throw new LifecycleError("kiro_settings_invalid", `Kiro nemo_guardrails.${name} must be text`);
+    return item;
+  };
+  const timeout = value.timeout_seconds;
+  if (timeout !== undefined && (typeof timeout !== "number" || !(timeout > 0))) {
+    throw new LifecycleError("kiro_settings_invalid", "Kiro nemo_guardrails.timeout_seconds must be a positive number");
+  }
+  const agentName = text("agent_name");
+  const agentDigest = text("agent_digest");
+  return {
+    url: value.url,
+    ...(agentName === undefined ? {} : { agentName }),
+    ...(agentDigest === undefined ? {} : { agentDigest }),
+    ...(timeout === undefined ? {} : { timeoutSeconds: timeout as number }),
   };
 }
 

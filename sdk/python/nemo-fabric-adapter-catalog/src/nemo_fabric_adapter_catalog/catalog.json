@@ -50,6 +50,46 @@
                     "max_turns": {
                       "minimum": 1,
                       "type": "integer"
+                    },
+                    "plugins": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "paths": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "paths"
+                      ],
+                      "type": "object"
+                    },
+                    "skills": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "paths": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "paths"
+                      ],
+                      "type": "object"
+                    },
+                    "tools": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
                     }
                   },
                   "required": [
@@ -347,7 +387,7 @@
         "name": "nemo-fabric-adapters-claude",
         "version": "0.7.0"
       },
-      "sha256": "8ff3fd9acee08a4b1d4df12314b318ccaea66da9a0aff52015b0a41555fa544d",
+      "sha256": "208f94c1460416167ae3491a5ec60fa156747ea97422f5340e461295c04cc3cd",
       "source": "adapters/python/claude/claude.fabric-adapter.json"
     },
     "nvidia.fabric.cline": {
@@ -1546,11 +1586,166 @@
         "config": {
           "accepts": [
             "models",
-            "mcp"
+            "mcp",
+            "instructions.system",
+            "skills",
+            "tools.enabled",
+            "tools.blocked"
+          ],
+          "system_instruction_modes": [
+            "append"
           ]
         },
         "contract_version": "fabric.adapter/v1alpha2",
         "extension_schemas": {
+          "agent_config": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "nemo_fabric.agents.v1": {
+                "additionalProperties": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "instructions": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "mcp": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "servers": {
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "servers"
+                      ],
+                      "type": "object"
+                    },
+                    "model": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "model": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "provider": {
+                          "const": "kiro"
+                        }
+                      },
+                      "required": [
+                        "provider",
+                        "model"
+                      ],
+                      "type": "object"
+                    },
+                    "plugins": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "paths": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "paths"
+                      ],
+                      "type": "object"
+                    },
+                    "skills": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "paths": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "paths"
+                      ],
+                      "type": "object"
+                    },
+                    "tools": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "description",
+                    "instructions"
+                  ],
+                  "type": "object"
+                },
+                "propertyNames": {
+                  "pattern": "^[a-z0-9_][a-z0-9_-]*$"
+                },
+                "type": "object"
+              },
+              "nemo_fabric.hooks.v1": {
+                "additionalProperties": false,
+                "properties": {
+                  "entries": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "format": {
+                          "enum": [
+                            "https://agent-plugins.org/schemas/1.1.0/hooks.schema.json"
+                          ]
+                        },
+                        "path": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "format"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "entries"
+                ],
+                "type": "object"
+              },
+              "nemo_fabric.tools.v1": {
+                "additionalProperties": false,
+                "properties": {
+                  "builtin": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "builtin"
+                ],
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
           "run_error": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "additionalProperties": false,
@@ -1646,6 +1841,29 @@
               "minLength": 1,
               "type": "string"
             },
+            "nemo_guardrails": {
+              "additionalProperties": false,
+              "properties": {
+                "agent_digest": {
+                  "type": "string"
+                },
+                "agent_name": {
+                  "type": "string"
+                },
+                "timeout_seconds": {
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "url": {
+                  "pattern": "^https?://",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "type": "object"
+            },
             "permission_mode": {
               "enum": [
                 "deny",
@@ -1662,7 +1880,7 @@
         "name": "nemo-fabric-adapters-kiro",
         "version": "0.7.0"
       },
-      "sha256": "7273f357f8f8f3d429f4127d06f29653c015d20fb4d82d3c8c0f4dee9f84ff2c",
+      "sha256": "ea661e82aa33bd866ca358974663bc5dfd067a04dd1e98eca393e2d022ce35bd",
       "source": "adapters/typescript/kiro/kiro.fabric-adapter.json"
     },
     "nvidia.fabric.langchain.deepagents": {

@@ -1,0 +1,3 @@
+{"harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"},
+ "models": {"default": {"provider": "bedrock_converse", "model": "us.anthropic.claude-haiku-5-5"}},
+ "environment": {"env_names": ["AWS_REGION"]}}

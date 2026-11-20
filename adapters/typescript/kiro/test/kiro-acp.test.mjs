@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import { chmod, copyFile, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import test from "node:test";
@@ -16,7 +16,10 @@ for (const fixtureType of process.platform === "win32" ? ["executable"] : ["shel
       const bin = await mkdtemp(join(tmpdir(), "fabric-kiro-bin-"));
       const executable = join(bin, process.platform === "win32" ? "kiro-cli.exe" : "kiro-cli");
       if (fixtureType === "executable") {
-        await copyFile(process.execPath, executable);
+        // A copy of a node built against a shared libnode (Homebrew) cannot load it from another
+        // folder; a symlink keeps the real path. Windows has no cheap symlinks: copy there.
+        if (process.platform === "win32") await copyFile(process.execPath, executable);
+        else await symlink(process.execPath, executable);
         await writeFile(join(bin, "acp"), 'import(require("node:url").pathToFileURL(process.env.TEST_ACP_FIXTURE).href);\n');
       } else {
         await writeFile(

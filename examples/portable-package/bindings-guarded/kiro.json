@@ -1,0 +1,2 @@
+{"harness": {"adapter_id": "nvidia.fabric.kiro", "settings": {"nemo_guardrails": {"url": "http://127.0.0.1:8100"}}},
+ "models": {"default": {"provider": "kiro", "model": "auto"}}}

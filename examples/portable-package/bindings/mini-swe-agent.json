@@ -1,0 +1,4 @@
+{"harness": {"adapter_id": "nvidia.fabric.mini-swe-agent"},
+ "models": {"default": {"provider": "bedrock", "model": "us.anthropic.claude-haiku-5-5", "settings": {"cost_tracking": "disabled"}}},
+ "runtime": {"max_turns": 6, "timeout_seconds": 300},
+ "environment": {"env_names": ["AWS_REGION"]}}

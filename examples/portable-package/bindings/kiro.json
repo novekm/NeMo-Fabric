@@ -1,0 +1,2 @@
+{"harness": {"adapter_id": "nvidia.fabric.kiro"},
+ "models": {"default": {"provider": "kiro", "model": "auto"}}}

@@ -10,14 +10,26 @@
     "binaries": ["node", "kiro-cli"]
   },
   "config": {
-    "accepts": ["models", "mcp"]
+    "accepts": ["models", "mcp", "instructions.system", "skills", "tools.enabled", "tools.blocked"],
+    "system_instruction_modes": ["append"]
   },
   "settings_schema": {
     "type": "object",
     "properties": {
       "mode_id": {"type": "string", "minLength": 1},
       "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"]},
-      "permission_mode": {"type": "string", "enum": ["deny", "allow_once"]}
+      "permission_mode": {"type": "string", "enum": ["deny", "allow_once"]},
+      "nemo_guardrails": {
+        "type": "object",
+        "properties": {
+          "url": {"type": "string", "pattern": "^https?://"},
+          "agent_name": {"type": "string"},
+          "agent_digest": {"type": "string"},
+          "timeout_seconds": {"type": "number", "exclusiveMinimum": 0}
+        },
+        "required": ["url"],
+        "additionalProperties": false
+      }
     },
     "additionalProperties": false
   },
@@ -32,6 +44,76 @@
     "additionalProperties": false
   },
   "extension_schemas": {
+    "agent_config": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "nemo_fabric.hooks.v1": {
+          "type": "object",
+          "properties": {
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {"type": "string", "minLength": 1},
+                  "format": {"enum": ["https://agent-plugins.org/schemas/1.1.0/hooks.schema.json"]}
+                },
+                "required": ["path", "format"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["entries"],
+          "additionalProperties": false
+        },
+        "nemo_fabric.tools.v1": {
+          "type": "object",
+          "properties": {"builtin": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}},
+          "required": ["builtin"],
+          "additionalProperties": false
+        },
+        "nemo_fabric.agents.v1": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[a-z0-9_][a-z0-9_-]*$"},
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "description": {"type": "string", "minLength": 1},
+              "instructions": {"type": "string", "minLength": 1},
+              "tools": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+              "model": {
+                "type": "object",
+                "properties": {"provider": {"const": "kiro"}, "model": {"type": "string", "minLength": 1}},
+                "required": ["provider", "model"],
+                "additionalProperties": false
+              },
+              "mcp": {
+                "type": "object",
+                "properties": {"servers": {"type": "object"}},
+                "required": ["servers"],
+                "additionalProperties": false
+              },
+              "skills": {
+                "type": "object",
+                "properties": {"paths": {"type": "array", "items": {"type": "string", "minLength": 1}}},
+                "required": ["paths"],
+                "additionalProperties": false
+              },
+              "plugins": {
+                "type": "object",
+                "properties": {"paths": {"type": "array", "items": {"type": "string", "minLength": 1}}},
+                "required": ["paths"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["description", "instructions"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "run_error": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

@@ -1,0 +1,5 @@
+{
+  "harness": {"adapter_id": "nvidia.fabric.claude"},
+  "models": {"default": {"provider": "anthropic", "model": "us.anthropic.claude-haiku-5-5"}},
+  "environment": {"env_names": ["CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]}
+}

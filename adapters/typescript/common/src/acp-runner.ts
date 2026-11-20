@@ -50,6 +50,8 @@ export interface AcpSessionOptions {
   configOptions?: AcpConfigOption[];
   readinessNotification?: AcpSessionReadinessNotification;
   permissionResolver?: AcpPermissionResolver;
+  /** Extra `clientCapabilities._meta` entries, such as a harness-specific opt-in. */
+  clientCapabilityMeta?: Record<string, unknown>;
   startupTimeoutMs?: number;
   promptTimeoutMs?: number;
   shutdownTimeoutMs?: number;
@@ -67,6 +69,8 @@ export interface AcpSession {
   readonly sessionId: string;
   readonly initializeResponse: InitializeResponse;
   observeProcess(): { alive: boolean };
+  /** The values the agent advertised for a select session option when the session was created. */
+  advertisedValues(optionId: string): Array<string | boolean>;
   // Pass null to disable the prompt deadline; omission uses the session default.
   prompt(text: string, timeoutMs?: number | null): Promise<AcpPromptResult>;
   stop(): Promise<void>;
@@ -249,6 +253,11 @@ class SpawnedAcpSession implements AcpSession {
     this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
   }
 
+  advertisedValues(optionId: string): Array<string | boolean> {
+    const option = (this.activeSession.newSessionResponse.configOptions ?? []).find((entry) => entry.id === optionId);
+    return option === undefined ? [] : selectValues(option);
+  }
+
   observeProcess(): { alive: boolean } {
     return {
       alive:
@@ -400,7 +409,10 @@ export async function startAcpSession(options: AcpSessionOptions): Promise<AcpSe
     const initializeResponse = await timeout(
       connection.agent.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
-        clientCapabilities: { session: { configOptions: {} } },
+        clientCapabilities: {
+          session: { configOptions: {} },
+          ...(options.clientCapabilityMeta === undefined ? {} : { _meta: options.clientCapabilityMeta }),
+        },
         clientInfo: {
           name: options.clientName ?? "nemo-fabric",
           version: options.clientVersion ?? "0.6.0",

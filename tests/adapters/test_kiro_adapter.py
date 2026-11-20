@@ -20,6 +20,7 @@ from nemo_fabric import InstructionConfig
 from nemo_fabric import InstructionsConfig
 from nemo_fabric import MetadataConfig
 from nemo_fabric import ModelConfig
+from nemo_fabric import RuntimeConfig
 from nemo_fabric import ToolsConfig
 
 
@@ -54,7 +55,17 @@ def test_kiro_descriptor_declares_only_the_supported_surface():
     assert descriptor["adapter_kind"] == "process"
     assert descriptor["runner"] == {"command": "node", "script": "dist/cli.js"}
     assert descriptor["requirements"] == {"binaries": ["node", "kiro-cli"]}
-    assert descriptor["config"] == {"accepts": ["models", "mcp"]}
+    assert descriptor["config"] == {
+        "accepts": [
+            "models",
+            "mcp",
+            "instructions.system",
+            "skills",
+            "tools.enabled",
+            "tools.blocked",
+        ],
+        "system_instruction_modes": ["append"],
+    }
     assert descriptor["model_schema"]["properties"]["provider"] == {"const": "kiro"}
     assert descriptor["model_schema"]["properties"]["api_key_env"] == {
         "const": "KIRO_API_KEY"
@@ -117,22 +128,20 @@ def test_kiro_descriptor_rejects_unknown_settings_and_model_endpoint(adapter_con
 
 
 def test_kiro_descriptor_rejects_unadvertised_normalized_fields():
+    turns = config()
+    turns.runtime = RuntimeConfig(max_turns=3)
+    with pytest.raises(FabricConfigError, match="runtime.max_turns"):
+        Fabric().plan(turns, base_dir=ROOT)
+
+
+def test_kiro_descriptor_takes_instructions_and_skills():
     instructed = config()
     instructed.instructions = InstructionsConfig(
-        system=InstructionConfig(content="unsupported")
+        system=InstructionConfig(content="supported", mode="append")
     )
-    with pytest.raises(FabricConfigError, match="instructions.system"):
-        Fabric().plan(instructed, base_dir=ROOT)
+    instructed.add_skill_path("tests/fixtures/default")
 
-    tools = config()
-    tools.tools = ToolsConfig(enabled=["read"])
-    with pytest.raises(FabricConfigError, match="tools.enabled"):
-        Fabric().plan(tools, base_dir=ROOT)
-
-    skills = config()
-    skills.add_skill_path("tests/fixtures/default")
-    with pytest.raises(FabricConfigError, match="skills"):
-        Fabric().plan(skills, base_dir=ROOT)
+    Fabric().plan(instructed, base_dir=ROOT)
 
 
 async def test_kiro_descriptor_doctor_reports_node_and_kiro_cli(tmp_path, monkeypatch):

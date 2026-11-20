@@ -16,7 +16,11 @@ import {
   type AdapterStartInput,
 } from "nemo-fabric-adapters-common";
 
-import { selectMcpServers, selectModel, selectSettings, workspacePath } from "./configuration.js";
+import { selectMcpServers, selectModel, selectSettings, workspacePath, type KiroSettings } from "./configuration.js";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { packageHooks, prepareWorkspaceFiles, type HookCommand, type WorkspaceFiles } from "./workspace-files.js";
 
 export interface KiroPromptOutcome {
   text: string;
@@ -151,6 +155,24 @@ function normalizeUsage(current: AcpUsage, previous: AcpUsage | undefined): Agen
   };
 }
 
+const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+
+/** The PreToolUse command that asks a NeMo Guardrails hooks server, when the settings name one. */
+function guardrailsHook(settings: KiroSettings, input: AdapterStartInput): HookCommand | undefined {
+  const setting = settings.guardrails;
+  if (setting === undefined) return undefined;
+  const script = fileURLToPath(new URL("./guardrails-hook.js", import.meta.url));
+  const flags: Array<[string, string | undefined]> = [
+    ["url", setting.url],
+    ["agent-name", setting.agentName ?? input.agentName],
+    ["agent-digest", setting.agentDigest],
+    ["run-id", process.env.FABRIC_RUNTIME_ID],
+    ["timeout", setting.timeoutSeconds === undefined ? undefined : String(setting.timeoutSeconds)],
+  ];
+  const args = flags.flatMap(([flag, value]) => (value === undefined ? [] : [`--${flag}`, shellQuote(value)]));
+  return { command: [shellQuote(process.execPath), shellQuote(script), ...args].join(" ") };
+}
+
 class KiroAcpSession implements KiroSessionHandle {
   private stopped = false;
   readonly id: string;
@@ -158,7 +180,10 @@ class KiroAcpSession implements KiroSessionHandle {
   private previousUsage?: AcpPromptResult["usage"];
   private usageContinuityLost = false;
 
-  constructor(session: AcpSession) {
+  private readonly files: WorkspaceFiles;
+
+  constructor(session: AcpSession, files: WorkspaceFiles) {
+    this.files = files;
     this.session = session;
     this.id = session.sessionId;
   }
@@ -230,7 +255,11 @@ class KiroAcpSession implements KiroSessionHandle {
 
   async stop(): Promise<void> {
     this.stopped = true;
-    await this.session.stop();
+    try {
+      await this.session.stop();
+    } finally {
+      await this.files.cleanup();
+    }
   }
 }
 
@@ -245,8 +274,30 @@ export class KiroAcpSessionFactory implements KiroSessionFactory {
       ...(model === undefined ? [] : [{ id: "model", value: model }]),
       ...(settings.effort === undefined ? [] : [{ id: "effortLevel", value: settings.effort }]),
     ];
+    const files = await prepareWorkspaceFiles(
+      input.config,
+      workspace,
+      input.baseDir,
+      input.agentName,
+      mcpServers.map((server) => ({ name: server.name })),
+      guardrailsHook(settings, input),
+      await packageHooks(
+        input.config,
+        input.baseDir,
+        fileURLToPath(new URL("./package-hook.js", import.meta.url)),
+        join(tmpdir(), "nemo-fabric-kiro-hook-data"),
+      ),
+    );
+    if (files.leadMode !== undefined && settings.modeId !== undefined) {
+      await files.cleanup();
+      throw new LifecycleError(
+        "kiro_mode_conflict",
+        "harness.settings.mode_id selects a Kiro mode, and the package's own agent needs the mode: set one or the other",
+      );
+    }
+    const modeId = files.leadMode ?? settings.modeId;
     try {
-      const session = await startAcpSession({
+      const start = (): Promise<AcpSession> => startAcpSession({
         command: "kiro-cli",
         args: ["acp", "--agent-engine=v3"],
         cwd: workspace,
@@ -265,14 +316,36 @@ export class KiroAcpSessionFactory implements KiroSessionFactory {
                   ),
               },
             }),
-        ...(settings.modeId === undefined ? {} : { modeId: settings.modeId }),
+        ...(modeId === undefined ? {} : { modeId }),
+        // Kiro runs hooks in an ACP session only for a client that opts in.
+        ...(files.hooks ? { clientCapabilityMeta: { kiro: { hooks: { enabled: true, v2: true } } } } : {}),
         configOptions,
         permissionResolver: () => settings.permissionMode,
         clientName: "nemo-fabric-kiro",
         clientVersion: "0.6.0",
       });
-      return new KiroAcpSession(session);
+      // Kiro now and then starts a session without the model list it advertises a moment later: ask once more.
+      let session: AcpSession;
+      try {
+        session = await start();
+      } catch (error) {
+        if (!(error instanceof AcpRunnerError) || error.code !== "acp_config_option_unsupported") throw error;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        session = await start();
+      }
+      const advertised = session.advertisedValues("model");
+      const missing = files.memberModels.filter((member) => !advertised.includes(member.model));
+      if (missing.length > 0) {
+        await session.stop().catch(() => undefined);
+        await files.cleanup();
+        throw new LifecycleError(
+          "kiro_member_model_unsupported",
+          `Kiro does not advertise the model of called agent ${missing.map((member) => `${member.agent} (${member.model})`).join(", ")}`,
+        );
+      }
+      return new KiroAcpSession(session, files);
     } catch (error) {
+      await files.cleanup();
       if (error instanceof AcpRunnerError) throw translateRunnerError(error, "start");
       if (error instanceof LifecycleError) throw error;
       throw new LifecycleError("kiro_start_failed", "Kiro ACP initialization failed", { retryable: true });
