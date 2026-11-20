@@ -30,7 +30,8 @@ use super::needs::need_lines;
 use super::options::AgentPackageOptions;
 use super::paths::json_pointer;
 use super::report::{
-    DeclaredItem, DeclaredKind, DeclaredStatus, ItemEffect, MappingGap, ModelOrigin, ModelReport,
+    CalledModel, DeclaredItem, DeclaredKind, DeclaredStatus, ItemEffect, MappingGap, ModelOrigin,
+    ModelReport,
 };
 use crate::config::{
     AdapterConfigField, FabricConfig, InstructionConfig, InstructionMode, McpServerConfig,
@@ -101,7 +102,22 @@ pub(super) fn unmapped_model(reading: &PackageReading) -> ModelReport {
         origin: ModelOrigin::NotEvaluated,
         parameters_applied: Vec::new(),
         parameters_not_applied: Vec::new(),
+        called: called_models(reading),
     }
+}
+
+/// The model each called agent takes, at any depth.
+fn called_models(reading: &PackageReading) -> Vec<CalledModel> {
+    reading
+        .called
+        .iter()
+        .filter_map(|called| {
+            Some(CalledModel {
+                agent: called.place.join("/"),
+                declared_source: called.model_source.clone()?,
+            })
+        })
+        .collect()
 }
 
 /// The requested mode when the adapter offers it. With no request: replace when
@@ -145,6 +161,8 @@ const HOOKS_KEY: &str = "nemo_fabric.hooks.v1";
 /// The root extension key that carries called agents by name:
 /// `{"<name>": {"description", "instructions", "max_turns", "skills"}}`.
 const AGENTS_KEY: &str = "nemo_fabric.agents.v1";
+/// The root extension key that carries the built-in tools the agent itself lists.
+const TOOLS_KEY: &str = "nemo_fabric.tools.v1";
 /// The file in a hook's folder that lists its handlers.
 const HOOKS_FILE: &str = "hooks.json";
 
@@ -304,6 +322,7 @@ impl<'a> Mapper<'a> {
             },
             parameters_applied: Vec::new(),
             parameters_not_applied: Vec::new(),
+            called: called_models(reading),
         };
         let model_key = caller_model.map(|(key, _)| key.clone());
         Self {
@@ -1551,6 +1570,9 @@ impl<'a> Mapper<'a> {
 
     fn tools(&mut self) {
         let mut seen: Vec<(Option<String>, String)> = Vec::new();
+        // The built-in tools the agent lists go to an adapter that takes them
+        // under its own key, one at a time; the others keep their default tools.
+        let mut offered_tools: Vec<Value> = Vec::new();
         for doc in self.docs() {
             let Some(tools) = doc.value.get("tools").and_then(Value::as_array) else {
                 continue;
@@ -1578,9 +1600,23 @@ impl<'a> Mapper<'a> {
                 item.connector = connector.clone();
                 if self.evaluate {
                     item = match connector {
-                        None => item.unchecked(
-                            "the format defines no built-in tool names and NeMo Fabric's tool names are adapter-native; the harness keeps its default tools",
-                        ),
+                        None => {
+                            let mut with = offered_tools.clone();
+                            with.push(Value::String(name.clone()));
+                            let index = offered_tools.len();
+                            match self.offer_extension(
+                                TOOLS_KEY,
+                                serde_json::json!({"builtin": with.clone()}),
+                            ) {
+                                Ok(()) => {
+                                    offered_tools = with;
+                                    item.mapped(vec![format!("{TOOLS_KEY}.builtin.{index}")])
+                                }
+                                Err(_) => item.unchecked(
+                                    "the format defines no built-in tool names and NeMo Fabric's tool names are adapter-native; the harness keeps its default tools",
+                                ),
+                            }
+                        }
                         Some(connector) => match self.connectors.get(&connector) {
                             Some(ConnectorState::Usable) => item.unchecked(
                                 "the tool comes with its connector's server, and the server's tools are known only when it runs",
@@ -1869,7 +1905,14 @@ impl<'a> Mapper<'a> {
                 members.insert(member.to_string(), text.clone());
             }
         }
-        offer(self, &members)?;
+        offer(self, &members).map_err(|(gap, reason)| {
+            (
+                gap,
+                format!(
+                    "the harness cannot run a called agent as a subagent of its own, and NeMo Fabric runs none: {reason}"
+                ),
+            )
+        })?;
         let mut entry = CalledEntry::default();
         if let Some((applies, allowed_by)) = self.called_turn_limit(called) {
             let mut with = members.clone();
@@ -1888,34 +1931,154 @@ impl<'a> Mapper<'a> {
                 kept,
             });
         }
-        let mut folders = Vec::new();
-        let skills = called.filled.get("skills").and_then(Value::as_object);
-        for (skill, reference) in skills.into_iter().flatten() {
-            let (part, left_out) = self.called_lookup(called, PartField::Skills, skill);
-            let folder = Self::carried(part, left_out, reference)
-                .and_then(|(part, path)| folder_text(part, &path, "skill"));
-            let kept = folder.and_then(|folder| {
-                let mut with = members.clone();
-                folders.push(Value::String(folder));
-                with.insert(
-                    "skills".to_string(),
-                    serde_json::json!({"paths": folders.clone()}),
-                );
-                match offer(self, &with) {
-                    Ok(()) => {
-                        members = with;
-                        Ok(format!(
-                            "{AGENTS_KEY}.{name}.skills.paths.{}",
-                            folders.len() - 1
-                        ))
+        // Each skill and each plugin is a verified folder the entry lists by
+        // path, one at a time, and the entry keeps the ones its schema takes.
+        for (member, field, kind) in [
+            ("skills", PartField::Skills, "skill"),
+            ("plugins", PartField::Plugins, "plugin"),
+        ] {
+            let mut folders = Vec::new();
+            let held = called.filled.get(member).and_then(Value::as_object);
+            for (key, reference) in held.into_iter().flatten() {
+                let (part, left_out) = self.called_lookup(called, field, key);
+                let folder = Self::carried(part, left_out, reference)
+                    .and_then(|(part, path)| folder_text(part, &path, kind));
+                let kept = folder.and_then(|folder| {
+                    let mut with = members.clone();
+                    folders.push(Value::String(folder));
+                    with.insert(
+                        member.to_string(),
+                        serde_json::json!({"paths": folders.clone()}),
+                    );
+                    match offer(self, &with) {
+                        Ok(()) => {
+                            members = with;
+                            Ok(format!(
+                                "{AGENTS_KEY}.{name}.{member}.paths.{}",
+                                folders.len() - 1
+                            ))
+                        }
+                        Err(refused) => {
+                            folders.pop();
+                            Err(refused)
+                        }
                     }
-                    Err(refused) => {
-                        folders.pop();
-                        Err(refused)
-                    }
+                });
+                match field {
+                    PartField::Skills => entry.skills.insert(key.clone(), kept),
+                    _ => entry.plugins.insert(key.clone(), kept),
+                };
+            }
+        }
+        // The built-in tools the agent lists. A tool of another kind has no
+        // place in the entry.
+        let mut listed = Vec::new();
+        let tools = called.filled.get("tools").and_then(Value::as_array);
+        for tool in tools.into_iter().flatten() {
+            let Some(builtin) = tool.get("builtin").and_then(Value::as_str) else {
+                continue;
+            };
+            let mut with = members.clone();
+            listed.push(Value::String(builtin.to_string()));
+            with.insert("tools".to_string(), Value::Array(listed.clone()));
+            let kept = match offer(self, &with) {
+                Ok(()) => {
+                    members = with;
+                    Ok(format!("{AGENTS_KEY}.{name}.tools.{}", listed.len() - 1))
                 }
+                Err(refused) => {
+                    listed.pop();
+                    Err(refused)
+                }
+            };
+            entry.tools.insert(builtin.to_string(), kept);
+        }
+        // The agent's own time limit.
+        if let Some(seconds) = called
+            .limits
+            .get("timeout_seconds")
+            .and_then(whole_number)
+        {
+            let mut with = members.clone();
+            with.insert("timeout_seconds".to_string(), Value::from(seconds));
+            let kept = offer(self, &with).map(|()| format!("{AGENTS_KEY}.{name}.timeout_seconds"));
+            if kept.is_ok() {
+                members = with;
+            }
+            entry.timeout = Some(kept);
+        }
+        // The model the agent names. The adapter's schema decides whether it
+        // takes the provider and the name: a model it cannot run is not mapped,
+        // and the agent runs on the model of the run, as it does without one.
+        if let Some((provider, model)) = called
+            .filled
+            .pointer("/model/source")
+            .and_then(Value::as_str)
+            .and_then(|source| source.split_once("::"))
+        {
+            let mut with = members.clone();
+            with.insert(
+                "model".to_string(),
+                serde_json::json!({"provider": provider, "model": model}),
+            );
+            let kept = offer(self, &with).map(|()| format!("{AGENTS_KEY}.{name}.model"));
+            if kept.is_ok() {
+                members = with;
+            }
+            entry.model = Some(kept);
+        }
+        // The connectors the package carries for the agent: every server of a
+        // connector's `mcp.json` becomes one stdio server of the entry.
+        let mut servers = Map::new();
+        let held = called.filled.get("connectors").and_then(Value::as_object);
+        for (key, reference) in held.into_iter().flatten() {
+            let (part, left_out) = self.called_lookup(called, PartField::Connectors, key);
+            let kept = Self::carried(part, left_out, reference).and_then(|(part, _)| {
+                let listing = self.reading.listings.get(&part.address).ok_or((
+                    MappingGap::ContentAbsent,
+                    "the connector's files were not listed when the package was checked".to_string(),
+                ))?;
+                let carried = connector::read_carried_connector(part, listing)
+                    .map_err(|error| (MappingGap::ContentAbsent, error.to_string()))?;
+                let CarriedConnector::Servers(carried) = carried else {
+                    let CarriedConnector::NotMapped { gap, detail } = carried else {
+                        unreachable!("a carried connector has servers or is not mapped")
+                    };
+                    return Err((gap, detail));
+                };
+                let mut entries = Vec::new();
+                for server in &carried {
+                    let config = connector::stdio_server(server).ok_or((
+                        MappingGap::UnsupportedPlatform,
+                        "a carried connector is started through /bin/sh, which is not on this platform"
+                            .to_string(),
+                    ))?;
+                    let server_key = if carried.len() == 1 {
+                        key.clone()
+                    } else {
+                        format!("{key}-{}", server.key)
+                    };
+                    entries.push((
+                        server_key,
+                        serde_json::to_value(&config)
+                            .map_err(|error| (MappingGap::UnsupportedShape, error.to_string()))?,
+                    ));
+                }
+                let mut with = members.clone();
+                let mut all = servers.clone();
+                for (server_key, config) in &entries {
+                    all.insert(server_key.clone(), config.clone());
+                }
+                with.insert("mcp".to_string(), serde_json::json!({"servers": all.clone()}));
+                offer(self, &with)
+                    .map(|()| {
+                        members = with;
+                        servers = all;
+                        format!("{AGENTS_KEY}.{name}.mcp.servers.{key}")
+                    })
+                    .map_err(|refused| refused)
             });
-            entry.skills.insert(skill.clone(), kept);
+            entry.connectors.insert(key.clone(), kept);
         }
         Ok(entry)
     }
@@ -2082,7 +2245,21 @@ impl<'a> Mapper<'a> {
         for (name, tail) in settings {
             let mut item = below.item(DeclaredKind::ModelSetting, "model", name, &tail);
             item.required = false;
-            let item = self.not_applied(item, below.run_by);
+            let item = match (below.run_by, name) {
+                (RunBy::Harness(entry), "source") if self.evaluate => match &entry.model {
+                    Some(Ok(path)) => item.mapped(vec![path.clone()]),
+                    Some(Err((gap, reason))) => item.not_mapped(
+                        *gap,
+                        format!(
+                            "{reason}. The agent runs on the model the config configures for the run"
+                        ),
+                    ),
+                    None => item.skipped(
+                        "the harness runs this agent on the model the config configures for the run, and the entry names none",
+                    ),
+                },
+                _ => self.not_applied(item, below.run_by),
+            };
             self.items.push(item);
         }
     }
@@ -2123,8 +2300,17 @@ impl<'a> Mapper<'a> {
                     .max_turns
                     .as_ref()
                     .map(|limit| (&limit.kept, Some(limit.detail()))),
+                (RunBy::Harness(entry), "limits", "timeout_seconds") => {
+                    entry.timeout.as_ref().map(|kept| (kept, None))
+                }
+                (RunBy::Harness(entry), "connectors", connector) => {
+                    entry.connectors.get(connector).map(|kept| (kept, None))
+                }
                 (RunBy::Harness(entry), "skills", skill) => {
                     entry.skills.get(skill).map(|kept| (kept, None))
+                }
+                (RunBy::Harness(entry), "plugins", plugin) => {
+                    entry.plugins.get(plugin).map(|kept| (kept, None))
                 }
                 _ => None,
             };
@@ -2166,7 +2352,14 @@ impl<'a> Mapper<'a> {
             );
             item.reason = text("description");
             item.connector = text("connector");
-            let item = self.not_applied(item, below.run_by);
+            let item = match (below.run_by, text("builtin")) {
+                (RunBy::Harness(entry), Some(builtin)) => match entry.tools.get(&builtin) {
+                    Some(Ok(path)) => item.mapped(vec![path.clone()]),
+                    Some(Err((gap, reason))) => item.not_mapped(*gap, reason.clone()),
+                    None => self.not_applied(item, below.run_by),
+                },
+                _ => self.not_applied(item, below.run_by),
+            };
             self.items.push(item);
         }
     }
@@ -2370,6 +2563,19 @@ struct CalledEntry {
     /// Each skill of the agent, by the skill's key: the config path its
     /// folder has, or why the entry does not carry it.
     skills: BTreeMap<String, Offered>,
+    /// Each plugin of the agent, by the plugin's key, as for skills.
+    plugins: BTreeMap<String, Offered>,
+    /// Each built-in tool of the agent, by name: where the entry lists it, or
+    /// why the entry does not carry it.
+    tools: BTreeMap<String, Offered>,
+    /// The agent's own time limit in seconds, as offered: the config path, or
+    /// why the entry does not carry it.
+    timeout: Option<Offered>,
+    /// The model the agent names, as `provider::name`, as offered.
+    model: Option<Offered>,
+    /// Each connector of the agent, by the connector's key: the config path of
+    /// its servers, or why the entry does not carry them.
+    connectors: BTreeMap<String, Offered>,
 }
 
 /// The config path of one member offered for a called agent's entry, or why
@@ -2380,6 +2586,16 @@ impl CalledEntry {
     /// What the harness gets for the agent, for the agent's own line.
     fn summary(&self) -> String {
         let mut carried = "its description and instructions".to_string();
+        if self.model.as_ref().is_some_and(|model| model.is_ok()) {
+            carried.push_str(", its model");
+        }
+        if self.timeout.as_ref().is_some_and(|timeout| timeout.is_ok()) {
+            carried.push_str(", its timeout");
+        }
+        let servers = self.connectors.values().filter(|kept| kept.is_ok()).count();
+        if servers > 0 {
+            carried.push_str(&format!(", {servers} connector(s)"));
+        }
         if let Some(limit) = self.max_turns.as_ref().filter(|limit| limit.kept.is_ok()) {
             carried.push_str(&format!(", max_turns {}", limit.applies));
         }
@@ -2387,6 +2603,16 @@ impl CalledEntry {
             0 => {}
             1 => carried.push_str(", 1 skill folder"),
             folders => carried.push_str(&format!(", {folders} skill folders")),
+        }
+        match self.plugins.values().filter(|kept| kept.is_ok()).count() {
+            0 => {}
+            1 => carried.push_str(", 1 plugin folder"),
+            folders => carried.push_str(&format!(", {folders} plugin folders")),
+        }
+        match self.tools.values().filter(|kept| kept.is_ok()).count() {
+            0 => {}
+            1 => carried.push_str(", 1 tool"),
+            tools => carried.push_str(&format!(", {tools} tools")),
         }
         format!(
             "handed to the adapter with {carried}. The document was checked against the lock. Everything else it declares follows, each thing on a line of its own"
@@ -4112,7 +4338,14 @@ mod tests {
         });
         for member in optional {
             members[*member] = match *member {
-                "max_turns" => json!({"type": "integer", "minimum": 1}),
+                "max_turns" | "timeout_seconds" => json!({"type": "integer", "minimum": 1}),
+                "model" => json!({"type": "object", "properties": {
+                    "provider": {"type": "string"}, "model": {"type": "string"}
+                }, "required": ["provider", "model"], "additionalProperties": false}),
+                "mcp" => json!({"type": "object", "properties": {
+                    "servers": {"type": "object"}
+                }, "required": ["servers"], "additionalProperties": false}),
+                "tools" => json!({"type": "array", "items": {"type": "string", "minLength": 1}}),
                 _ => paths_schema(),
             };
         }
@@ -4166,14 +4399,25 @@ mod tests {
                     "description": "Writes captions for a finished video.",
                     "instructions": "Write captions from the transcript you are given.",
                     "model": {"source": "ollama::llama3.2:3b"},
-                    "limits": {"max_turns": 10, "max_total_tokens": 100000},
-                    "skills": {"captions": {"source": "./skills/captions"}}
+                    "limits": {"max_turns": 10, "max_total_tokens": 100000, "timeout_seconds": 30},
+                    "connectors": {"words": {"source": "./connectors/words"}},
+                    "skills": {"captions": {"source": "./skills/captions"}},
+                    "plugins": {"frames": {"source": "./plugins/frames"}},
+                    "tools": [{"builtin": "read_file"}, {"builtin": "grep"}]
                 }),
             ),
         );
         package.write(
             "agents/captioner/skills/captions/SKILL.md",
             "---\nname: captions\n---\nKeep each caption to two lines.\n",
+        );
+        package.write(
+            "agents/captioner/plugins/frames/plugin.json",
+            r#"{"name": "frames"}"#,
+        );
+        package.write(
+            "agents/captioner/connectors/words/mcp.json",
+            r#"{"mcpServers": {"main": {"type": "stdio", "command": "node", "args": ["server.js"]}}}"#,
         );
         package.write_lock(
             "",
@@ -4195,7 +4439,23 @@ mod tests {
                     "agent",
                     "agents/captioner/agent.json",
                     "./agents/captioner/agent.json",
-                    &["$/agents/captioner/skills/captions"],
+                    &[
+                        "$/agents/captioner/connectors/words",
+                        "$/agents/captioner/plugins/frames",
+                        "$/agents/captioner/skills/captions",
+                    ],
+                ),
+                package.folder_entry(
+                    "$/agents/captioner/connectors/words",
+                    "connector",
+                    "agents/captioner/connectors/words",
+                    "./agents/captioner/connectors/words",
+                ),
+                package.folder_entry(
+                    "$/agents/captioner/plugins/frames",
+                    "plugin",
+                    "agents/captioner/plugins/frames",
+                    "./agents/captioner/plugins/frames",
                 ),
                 package.folder_entry(
                     "$/agents/captioner/skills/captions",
@@ -4556,10 +4816,224 @@ mod tests {
             assert_eq!(tokens.status, DeclaredStatus::NotMapped);
             assert_eq!(tokens.gap, Some(MappingGap::NoFabricField));
             assert!(!tokens.required);
+            // The harness runs the agent on the model the run is configured
+            // with. The line says so, and does not stop a load.
             let model = item(&mapped, "agent:/agents/captioner/model/source");
             assert_eq!(model.status, DeclaredStatus::NotMapped);
+            assert_eq!(model.gap, Some(MappingGap::AdapterDoesNotAccept));
             assert!(!model.required);
         }
+    }
+
+    #[test]
+    fn a_called_agents_tools_plugins_and_skills_go_to_a_harness_that_takes_them() {
+        let (_package, reading) = video_producer("called-parts", &hooks_json(HOOK_FORMAT));
+        let frames = folder(&reading, "$/agents/captioner/plugins/frames");
+        let captions = folder(&reading, "$/agents/captioner/skills/captions");
+
+        let mapped = map_with(
+            &reading,
+            video_producer_config(json!({})),
+            &declaring(agents_schema(&["max_turns", "skills", "plugins", "tools"])),
+            &AgentPackageOptions::default(),
+        );
+
+        // The reviewer states none of them, so its entry carries none.
+        assert_eq!(
+            mapped.config.extensions[AGENTS_KEY]["captioner"],
+            json!({
+                "description": "Writes captions for a finished video.",
+                "instructions": "Write captions from the transcript you are given.",
+                "max_turns": 10,
+                "skills": {"paths": [captions]},
+                "plugins": {"paths": [frames]},
+                "tools": ["read_file", "grep"]
+            })
+        );
+        assert!(
+            mapped.config.extensions[AGENTS_KEY]["reviewer"]
+                .get("tools")
+                .is_none()
+        );
+        for (id, to) in [
+            (
+                "agent:/agents/captioner/plugins/frames",
+                "nemo_fabric.agents.v1.captioner.plugins.paths.0",
+            ),
+            (
+                "agent:/agents/captioner/tools/0",
+                "nemo_fabric.agents.v1.captioner.tools.0",
+            ),
+            (
+                "agent:/agents/captioner/tools/1",
+                "nemo_fabric.agents.v1.captioner.tools.1",
+            ),
+        ] {
+            let line = item(&mapped, id);
+            assert_eq!(line.status, DeclaredStatus::Mapped, "{id}");
+            assert_eq!(line.mapped_to, vec![to.to_string()], "{id}");
+        }
+        let agent = item(&mapped, "agent:/agents/captioner");
+        let detail = agent.detail.as_deref().expect("a detail");
+        assert!(detail.contains("1 plugin folder, 2 tools"), "{detail}");
+
+        // A harness whose entry takes neither says so on a line of its own.
+        let mapped = map_with(
+            &reading,
+            video_producer_config(json!({})),
+            &declaring(agents_schema(&["max_turns", "skills"])),
+            &AgentPackageOptions::default(),
+        );
+        for id in [
+            "agent:/agents/captioner/plugins/frames",
+            "agent:/agents/captioner/tools/0",
+        ] {
+            let line = item(&mapped, id);
+            assert_eq!(line.status, DeclaredStatus::NotMapped, "{id}");
+            assert_eq!(line.gap, Some(MappingGap::AdapterDoesNotAccept), "{id}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_called_agents_model_timeout_and_connectors_go_to_a_harness_that_takes_them() {
+        let (_package, reading) = video_producer("called-more", &hooks_json(HOOK_FORMAT));
+        let words = folder(&reading, "$/agents/captioner/connectors/words");
+
+        let mapped = map_with(
+            &reading,
+            video_producer_config(json!({})),
+            &declaring(agents_schema(&["timeout_seconds", "model", "mcp"])),
+            &AgentPackageOptions::default(),
+        );
+
+        let captioner = &mapped.config.extensions[AGENTS_KEY]["captioner"];
+        assert_eq!(captioner["timeout_seconds"], json!(30));
+        assert_eq!(
+            captioner["model"],
+            json!({"provider": "ollama", "model": "llama3.2:3b"})
+        );
+        let server = &captioner["mcp"]["servers"]["words"];
+        assert_eq!(server["url"], json!("/bin/sh"), "{server}");
+        for (id, to) in [
+            (
+                "agent:/agents/captioner/limits/timeout_seconds",
+                "nemo_fabric.agents.v1.captioner.timeout_seconds",
+            ),
+            (
+                "agent:/agents/captioner/model/source",
+                "nemo_fabric.agents.v1.captioner.model",
+            ),
+            (
+                "agent:/agents/captioner/connectors/words",
+                "nemo_fabric.agents.v1.captioner.mcp.servers.words",
+            ),
+        ] {
+            let line = item(&mapped, id);
+            assert_eq!(line.status, DeclaredStatus::Mapped, "{id}");
+            assert_eq!(line.mapped_to, vec![to.to_string()], "{id}");
+        }
+        let detail = item(&mapped, "agent:/agents/captioner")
+            .detail
+            .clone()
+            .expect("a detail");
+        assert!(detail.contains("its model, its timeout, 1 connector(s)"), "{detail}");
+        assert_eq!(words.is_empty(), false);
+
+        // An adapter whose schema refuses the model says so and does not stop the load.
+        let mut refusing = agents_schema(&["model"]);
+        refusing[AGENTS_KEY]["additionalProperties"]["properties"]["model"]["properties"]["provider"] =
+            json!({"const": "kiro"});
+        let mapped = map_with(
+            &reading,
+            video_producer_config(json!({})),
+            &declaring(refusing),
+            &AgentPackageOptions::default(),
+        );
+        let model = item(&mapped, "agent:/agents/captioner/model/source");
+        assert_eq!(model.status, DeclaredStatus::NotMapped);
+        assert!(!model.required);
+        assert!(
+            model
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("runs on the model the config configures")),
+            "{:?}",
+            model.detail
+        );
+        assert!(mapped.config.extensions[AGENTS_KEY]["captioner"]
+            .get("model")
+            .is_none());
+    }
+
+    #[test]
+    fn the_agents_own_builtin_tools_go_to_an_adapter_that_declares_the_key() {
+        let reading = reading(agent(json!({
+            "tools": [{"builtin": "read_file"}, {"builtin": "shell"}]
+        })));
+        let schema = json!({TOOLS_KEY: {
+            "type": "object",
+            "properties": {"builtin": {"type": "array", "items": {"type": "string"}}},
+            "required": ["builtin"],
+            "additionalProperties": false
+        }});
+
+        let mapped = map_with(
+            &reading,
+            base(json!({})),
+            &declaring(schema),
+            &AgentPackageOptions::default(),
+        );
+
+        assert_eq!(
+            mapped.config.extensions[TOOLS_KEY],
+            json!({"builtin": ["read_file", "shell"]})
+        );
+        for (id, to) in [
+            ("agent:/tools/0", "nemo_fabric.tools.v1.builtin.0"),
+            ("agent:/tools/1", "nemo_fabric.tools.v1.builtin.1"),
+        ] {
+            let line = item(&mapped, id);
+            assert_eq!(line.status, DeclaredStatus::Mapped, "{id}");
+            assert_eq!(line.mapped_to, vec![to.to_string()], "{id}");
+        }
+
+        // An adapter that declares no such key keeps its default tools, as before.
+        let mapped = map_with(
+            &reading,
+            base(json!({})),
+            &declaring(plugins_schema()),
+            &AgentPackageOptions::default(),
+        );
+        assert!(!mapped.config.extensions.contains_key(TOOLS_KEY));
+        assert_eq!(
+            item(&mapped, "agent:/tools/0").status,
+            DeclaredStatus::CouldNotBeChecked
+        );
+    }
+
+    #[test]
+    fn a_harness_without_subagents_refuses_a_called_agent_and_says_why() {
+        let (_package, reading) = video_producer("called-refusal", &hooks_json(HOOK_FORMAT));
+
+        let mut mapped = map_with(
+            &reading,
+            video_producer_config(json!({})),
+            &declaring(plugins_schema()),
+            &AgentPackageOptions::default(),
+        );
+
+        let agent = item(&mapped, "agent:/agents/reviewer");
+        assert_eq!(agent.status, DeclaredStatus::NotMapped);
+        let detail = agent.detail.as_deref().expect("a detail");
+        assert!(
+            detail.contains("cannot run a called agent as a subagent of its own"),
+            "{detail}"
+        );
+        assert!(detail.contains("nemo_fabric.agents.v1"), "{detail}");
+        let (outcome, stopped) = stopped_by(&mut mapped);
+        assert_eq!(outcome, PackageOutcome::Stopped);
+        assert!(stopped.contains(&"agent:/agents/reviewer".to_string()));
     }
 
     #[test]

@@ -552,30 +552,76 @@ def _extension(config: AgentConfig, key: str) -> dict[str, Any]:
     return value
 
 
-def _package_plugins(config: AgentConfig, base_dir: str) -> list[dict[str, str]]:
-    """Return the plugin folders an agent package declares as local Claude plugins.
+def _claude_plugin_folder(
+    folder: Path,
+    *,
+    runtime_context: RuntimeContext,
+    base_dir: str,
+    where: str,
+) -> Path:
+    """Return a folder Claude Code reads as a plugin.
 
-    Each folder must hold the manifest Claude Code reads,
-    ``.claude-plugin/plugin.json``.
+    Claude Code reads ``.claude-plugin/plugin.json``. A plugin folder that is
+    laid out for it is used in place. A plugin folder with its manifest at
+    ``plugin.json``, the layout of an agent package, is copied under the
+    artifact root with that manifest at the place Claude Code reads. The
+    package's own folder is never written to.
     """
+
+    if not folder.is_dir():
+        raise AdapterConfigError(
+            "claude_invalid_configuration",
+            f"{where} path must be a directory containing "
+            f".claude-plugin/plugin.json or plugin.json: {folder}",
+        )
+    if (folder / ".claude-plugin" / "plugin.json").is_file():
+        return folder
+    if not (folder / "plugin.json").is_file():
+        raise AdapterConfigError(
+            "claude_invalid_configuration",
+            f"{where} path must be a directory containing "
+            f".claude-plugin/plugin.json or plugin.json: {folder}",
+        )
+    staged = (
+        _artifact_root(runtime_context, base_dir)
+        / ".fabric"
+        / "claude"
+        / "package-plugins"
+        / sha256(f"{runtime_context.runtime_id}/{folder}".encode()).hexdigest()
+        / folder.name
+    )
+    if staged.exists():
+        shutil.rmtree(staged)
+    shutil.copytree(folder, staged)
+    (staged / ".claude-plugin").mkdir(exist_ok=True)
+    shutil.copyfile(
+        staged / "plugin.json", staged / ".claude-plugin" / "plugin.json"
+    )
+    return staged
+
+
+def _package_plugins(
+    config: AgentConfig, runtime_context: RuntimeContext, base_dir: str
+) -> list[dict[str, str]]:
+    """Return the plugin folders an agent package declares as local Claude plugins."""
 
     paths = _string_list(
         _extension(config, _PLUGINS_KEY).get("paths"), name=f"{_PLUGINS_KEY}.paths"
     )
-    plugins: list[dict[str, str]] = []
-    for value in paths:
-        plugin_path = _resolve_path(base_dir, value)
-        if (
-            not plugin_path.is_dir()
-            or not (plugin_path / ".claude-plugin" / "plugin.json").is_file()
-        ):
-            raise AdapterConfigError(
-                "claude_invalid_configuration",
-                f"{_PLUGINS_KEY} path must be a directory containing "
-                f".claude-plugin/plugin.json: {plugin_path}",
-            )
-        plugins.append({"type": "local", "path": str(plugin_path)})
-    return plugins
+    return [
+        {
+            "type": "local",
+            "path": str(
+                _claude_plugin_folder(
+                    _resolve_path(base_dir, value),
+                    runtime_context=runtime_context,
+                    base_dir=base_dir,
+                    where=_PLUGINS_KEY,
+                )
+            ),
+        }
+        for value in paths
+    ]
 
 
 def _stage_relay_plugin(plugin_path: Path, executable: Path) -> None:
@@ -948,10 +994,146 @@ def _hooks(
 _AGENTS_KEY = "nemo_fabric.agents.v1"
 
 
-def _package_agents(config: AgentConfig) -> dict[str, AgentDefinition] | None:
-    """Return the called agents an agent package declares as Claude subagents."""
+# The built-in tools a package names, by the portable name, and Claude's name.
+_BUILTIN_TOOLS = {
+    "read_file": "Read",
+    "write_file": "Write",
+    "edit_file": "Edit",
+    "grep": "Grep",
+    "glob": "Glob",
+    "shell": "Bash",
+    "web_fetch": "WebFetch",
+    "web_search": "WebSearch",
+}
+
+
+def _claude_tools(names: list[str], *, where: str) -> list[str]:
+    unknown = [name for name in names if name not in _BUILTIN_TOOLS]
+    if unknown:
+        raise AdapterConfigError(
+            "claude_invalid_configuration",
+            f"{where}.tools names a built-in tool Claude has no name for: "
+            + ", ".join(unknown),
+        )
+    return [_BUILTIN_TOOLS[name] for name in names]
+
+
+def _folder_paths(
+    entry: dict[str, Any], member: str, *, where: str, base_dir: str
+) -> list[Path]:
+    """Return the folders an agent entry lists under ``member``, as paths."""
+
+    held = entry.get(member)
+    if held is None:
+        return []
+    paths = held.get("paths") if isinstance(held, dict) else None
+    return [
+        _resolve_path(base_dir, value)
+        for value in _string_list(paths, name=f"{where}.{member}.paths")
+    ]
+
+
+def _plugin_manifest_name(folder: Path) -> str:
+    try:
+        manifest = json.loads(
+            (folder / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+        )
+        name = manifest["name"]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise AdapterConfigError(
+            "claude_invalid_configuration",
+            f"a called agent's plugin needs .claude-plugin/plugin.json with a name: {folder}",
+        ) from error
+    if not isinstance(name, str) or not name:
+        raise AdapterConfigError(
+            "claude_invalid_configuration",
+            f"a called agent's plugin needs a name in plugin.json: {folder}",
+        )
+    return name
+
+
+def _skill_names_in_plugin(folder: Path, plugin: str) -> list[str]:
+    skills = folder / "skills"
+    if not skills.is_dir():
+        return []
+    return [
+        f"{plugin}:{child.name}"
+        for child in sorted(skills.iterdir())
+        if (child / "SKILL.md").is_file()
+    ]
+
+
+def _stage_agent_skills(
+    agent: str,
+    folders: list[Path],
+    runtime_context: RuntimeContext,
+    base_dir: str,
+) -> tuple[dict[str, str], list[str]]:
+    """Copy a called agent's skill folders into a plugin of its own.
+
+    Returns the plugin entry for the session and the skill names the subagent
+    lists. Claude Code gives a subagent the skills it names, so the skills of
+    one called agent are not listed on another.
+    """
+
+    plugin = f"nemo-fabric-agent-{agent}"
+    root = (
+        _artifact_root(runtime_context, base_dir)
+        / ".fabric"
+        / "claude"
+        / "agent-skills"
+        / sha256(f"{runtime_context.runtime_id}/{agent}".encode()).hexdigest()
+    )
+    if root.exists():
+        shutil.rmtree(root)
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / "skills").mkdir()
+    (root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": plugin,
+                "description": f"Skills of the called agent {agent}",
+                "version": "1.0.0",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    names: list[str] = []
+    for folder in folders:
+        if not folder.is_dir() or not (folder / "SKILL.md").is_file():
+            raise AdapterConfigError(
+                "claude_invalid_configuration",
+                f"a called agent's skill path must be a directory containing SKILL.md: {folder}",
+            )
+        if folder.name in {name.split(":", 1)[1] for name in names}:
+            raise AdapterConfigError(
+                "claude_invalid_configuration",
+                f"the skills of called agent {agent} must have unique names: {folder.name}",
+            )
+        shutil.copytree(folder, root / "skills" / folder.name)
+        names.append(f"{plugin}:{folder.name}")
+    return {"type": "local", "path": str(root)}, names
+
+
+def _package_agents(
+    config: AgentConfig,
+    runtime_context: RuntimeContext,
+    base_dir: str,
+) -> tuple[dict[str, AgentDefinition] | None, list[dict[str, str]]]:
+    """Return the called agents an agent package declares as Claude subagents.
+
+    Also returns the plugins the session has to load for them: a subagent
+    names the skills it uses, and Claude Code loads a skill from a plugin of
+    the session. The model is not passed: a subagent runs on the model of the
+    session unless it names one, and the loader reports the model a package
+    names for it as not used.
+    """
 
     agents: dict[str, AgentDefinition] = {}
+    plugins: list[dict[str, str]] = []
     for name, entry in _extension(config, _AGENTS_KEY).items():
         if not name:
             raise AdapterConfigError(
@@ -977,12 +1159,40 @@ def _package_agents(config: AgentConfig) -> dict[str, AgentDefinition] | None:
                 "claude_invalid_configuration",
                 f"{_AGENTS_KEY}.{name}.max_turns must be a whole number of at least 1",
             )
+        where = f"{_AGENTS_KEY}.{name}"
+        tools = entry.get("tools")
+        if tools is not None:
+            tools = _claude_tools(
+                _string_list(tools, name=f"{where}.tools"), where=where
+            )
+        skills: list[str] = []
+        skill_folders = _folder_paths(entry, "skills", where=where, base_dir=base_dir)
+        if skill_folders:
+            plugin, staged = _stage_agent_skills(
+                name, skill_folders, runtime_context, base_dir
+            )
+            plugins.append(plugin)
+            skills.extend(staged)
+        for value in _folder_paths(
+            entry, "plugins", where=where, base_dir=base_dir
+        ):
+            folder = _claude_plugin_folder(
+                value,
+                runtime_context=runtime_context,
+                base_dir=base_dir,
+                where=f"a called agent's plugin ({where})",
+            )
+            manifest = _plugin_manifest_name(folder)
+            plugins.append({"type": "local", "path": str(folder)})
+            skills.extend(_skill_names_in_plugin(folder, manifest))
         agents[name] = AgentDefinition(
             description=entry["description"],
             prompt=entry["instructions"],
+            tools=tools,
+            skills=skills or None,
             maxTurns=None if max_turns is None else int(max_turns),
         )
-    return agents or None
+    return agents or None, plugins
 
 
 def build_options(
@@ -1038,14 +1248,15 @@ def build_options(
         if permission_mode == "dontAsk" and enabled_tools is not None
         else []
     )
-    package_plugins = _package_plugins(config, base_dir)
-    agents = _package_agents(config)
+    package_plugins = _package_plugins(config, runtime_context, base_dir)
+    agents, agent_plugins = _package_agents(config, runtime_context, base_dir)
     hooks = _hooks(config, runtime_context, base_dir)
     plugins = _stage_skill_plugin(config, runtime_context, base_dir)
     has_skill_plugin = bool(plugins)
     if relay is not None:
         plugins.append({"type": "local", "path": str(relay.plugin_path)})
     plugins.extend(package_plugins)
+    plugins.extend(agent_plugins)
 
     environment = child_environment(
         model,
@@ -1075,7 +1286,7 @@ def build_options(
             mcp_servers=mcp.config_path if mcp is not None else {},
             strict_mcp_config=True,
             # A package plugin can carry skills, like the staged skills plugin.
-            skills="all" if has_skill_plugin or package_plugins else None,
+            skills="all" if has_skill_plugin or package_plugins or agent_plugins else None,
             plugins=plugins,
             env=environment,
             stderr=discard_stderr,

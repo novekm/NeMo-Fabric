@@ -207,6 +207,24 @@
       },
       "type": "object"
     },
+    "CalledModel": {
+      "description": "The model one called agent takes.",
+      "properties": {
+        "agent": {
+          "description": "The names that lead to the agent from the agent that runs, joined with `/`, its own last.",
+          "type": "string"
+        },
+        "declared_source": {
+          "description": "The model its document names, or its caller's when it names none.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "declared_source"
+      ],
+      "type": "object"
+    },
     "CheckerDecision": {
       "description": "Whether a loaded package may start.",
       "oneOf": [
@@ -1788,6 +1806,14 @@
     "ModelReport": {
       "description": "What was configured for the model. The model each run used is not reported here.\n\nThe caller's `models.default` is the model choice. A config that sets none\noffers a model by naming a `models` entry with the text of the document's\ndefault model, and the loader moves that entry to `models.default`. A\nconfig that holds one model under another name has chosen that model. The\nloader writes no model of its own.",
       "properties": {
+        "called": {
+          "default": [],
+          "description": "The model each called agent takes: its own, or its caller's when it names none.\nOne entry for each called agent that has a model, at any depth.",
+          "items": {
+            "$ref": "#/$defs/CalledModel"
+          },
+          "type": "array"
+        },
         "declared_source": {
           "description": "The document's default model, after variables.",
           "type": [

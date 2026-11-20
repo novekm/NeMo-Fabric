@@ -491,6 +491,7 @@ def test_a_model_the_config_offers_under_the_declared_name_becomes_the_default(
         "origin": "package",
         "parameters_applied": ("temperature",),
         "parameters_not_applied": (),
+        "called": (),
     }
     source = declared(report, "agent:/model/source")
     assert source["status"] == "mapped"

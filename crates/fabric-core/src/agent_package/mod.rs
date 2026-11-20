@@ -56,7 +56,7 @@ pub fn agent_package_start_facts(
     http_checker::start_facts(report, enforcers_present)
 }
 pub use report::{
-    AdapterReport, AgentPackageReport, CheckerDecision, CheckerFailure, CheckerResult,
+    AdapterReport, AgentPackageReport, CalledModel, CheckerDecision, CheckerFailure, CheckerResult,
     DeclaredItem, DeclaredKind, DeclaredStatus, DigestCheck, ItemEffect, MappingGap, ModelOrigin,
     ModelReport, PackageOutcome,
 };

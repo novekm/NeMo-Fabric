@@ -334,6 +334,33 @@ def test_claude_descriptor_is_narrow_and_versioned():
                                 "description": {"type": "string", "minLength": 1},
                                 "instructions": {"type": "string", "minLength": 1},
                                 "max_turns": {"type": "integer", "minimum": 1},
+                                "tools": {
+                                    "type": "array",
+                                    "items": {"type": "string", "minLength": 1},
+                                    "uniqueItems": True,
+                                },
+                                "skills": {
+                                    "type": "object",
+                                    "properties": {
+                                        "paths": {
+                                            "type": "array",
+                                            "items": {"type": "string", "minLength": 1},
+                                        }
+                                    },
+                                    "required": ["paths"],
+                                    "additionalProperties": False,
+                                },
+                                "plugins": {
+                                    "type": "object",
+                                    "properties": {
+                                        "paths": {
+                                            "type": "array",
+                                            "items": {"type": "string", "minLength": 1},
+                                        }
+                                    },
+                                    "required": ["paths"],
+                                    "additionalProperties": False,
+                                },
                             },
                             "required": ["description", "instructions"],
                             "additionalProperties": False,

@@ -130,6 +130,10 @@ pub(super) fn start_facts(report: &AgentPackageReport, enforcers_present: &[Stri
     if let Some(model) = &report.model.declared_source {
         add_model(model);
     }
+    // The models of the agents it calls: each is judged, so a member on a model a rule does not list is denied.
+    for called in &report.model.called {
+        add_model(&called.declared_source);
+    }
     for entry in &report.digests {
         if entry.address == report.entry.address {
             continue;

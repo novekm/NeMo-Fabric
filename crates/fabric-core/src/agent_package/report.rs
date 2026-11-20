@@ -361,6 +361,19 @@ pub struct ModelReport {
     pub parameters_applied: Vec<String>,
     /// Document model settings that were not written into the config.
     pub parameters_not_applied: Vec<String>,
+    /// The model each called agent takes: its own, or its caller's when it names none.
+    /// One entry for each called agent that has a model, at any depth.
+    #[serde(default)]
+    pub called: Vec<CalledModel>,
+}
+
+/// The model one called agent takes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CalledModel {
+    /// The names that lead to the agent from the agent that runs, joined with `/`, its own last.
+    pub agent: String,
+    /// The model its document names, or its caller's when it names none.
+    pub declared_source: String,
 }
 
 /// Who chose the configured model.
@@ -614,6 +627,7 @@ mod tests {
                 origin: ModelOrigin::HarnessDefault,
                 parameters_applied: Vec::new(),
                 parameters_not_applied: vec!["temperature".to_string()],
+                called: Vec::new(),
             },
             declared: vec![declared, unmapped],
             digests: vec![DigestCheck {

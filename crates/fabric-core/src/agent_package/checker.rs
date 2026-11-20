@@ -1059,6 +1059,81 @@ mod tests {
         );
     }
 
+    /// A lead on a listed model that calls one member. The member names `member_model`, or none.
+    fn lead_with_member(name: &str, member_model: Option<&str>) -> Package {
+        let package = Package::new(name);
+        package.write_json(
+            "agent.json",
+            &agent(
+                "code-reviewer",
+                json!({
+                    "model": {"source": "bedrock::listed"},
+                    "agents": {"member": {"source": "./agents/member"}}
+                }),
+            ),
+        );
+        let mut member = json!({
+            "description": "A member.",
+            "instructions": "Do the part."
+        });
+        if let Some(model) = member_model {
+            member["model"] = json!({"source": model});
+        }
+        package.write_json("agents/member/agent.json", &agent("member", member));
+        package.write_lock(
+            "",
+            vec![
+                package.file_entry(
+                    "$",
+                    "agent",
+                    "agent.json",
+                    "./agent.json",
+                    &["$/agents/member"],
+                ),
+                package.file_entry(
+                    "$/agents/member",
+                    "agent",
+                    "agents/member/agent.json",
+                    "./agents/member/agent.json",
+                    &[],
+                ),
+            ],
+        );
+        package
+    }
+
+    #[test]
+    fn the_facts_name_the_model_of_each_called_agent() {
+        // A member on its own model, and a member that names none and takes its caller's.
+        for (member_model, models) in [
+            (
+                Some("bedrock::unlisted"),
+                json!(["bedrock::listed", "bedrock::unlisted"]),
+            ),
+            (None, json!(["bedrock::listed"])),
+        ] {
+            let package = lead_with_member("checker-url-called-model", member_model);
+            let server = serve("200 OK", r#"{"decision": "allow"}"#, false, false);
+
+            // The test adapter runs no called agent, so let the load go on and ask.
+            let options = AgentPackageOptions {
+                if_unsupported: PackageAction::Warn,
+                ..asked_at(&server.url)
+            };
+            let report = load(&package, options);
+
+            let body = body_of(
+                &server
+                    .request
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap_or_else(|_| panic!("a request; the load gave {report:#?}")),
+            );
+            // The rule judges every model the run may use, the member's among them.
+            assert_eq!(body["models"], models, "{member_model:?}");
+            assert_eq!(body["declared_models"], models, "{member_model:?}");
+        }
+    }
+
     #[test]
     fn a_checker_url_that_denies_gives_no_config_and_its_reason_in_the_report() {
         let package = code_reviewer("checker-url-denies");

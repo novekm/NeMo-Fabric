@@ -50,6 +50,7 @@ async def test_loaded_package_runs_with_its_skill_connector_and_model(
         "origin": "caller",
         "parameters_applied": (),
         "parameters_not_applied": (),
+        "called": (),
     }
     assert declared(report, "agent:/model/source")["status"] == "skipped"
     skill = declared(report, "agent:/skills/release-notes")

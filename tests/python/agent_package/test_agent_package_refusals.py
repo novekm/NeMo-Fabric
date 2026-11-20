@@ -499,6 +499,7 @@ def test_document_model_is_reported_and_never_written_into_the_config(
         "origin": "harness_default",
         "parameters_applied": (),
         "parameters_not_applied": ("temperature",),
+        "called": (),
     }
     for item_id in ("agent:/model/source", "agent:/model/parameters/temperature"):
         item = next(item for item in report.declared if item["id"] == item_id)

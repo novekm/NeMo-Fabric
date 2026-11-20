@@ -264,10 +264,10 @@ def test_plan_hands_the_package_keys_to_the_adapter(
                 "captioner": {
                     "description": "Writes the captions file for a finished video.",
                     "instructions": "Write captions in the language you are given.",
-                    "skills": {"paths": ["agents/captioner/skills/captions"]},
+                    "connectors": {"paths": ["agents/captioner/connectors/queue"]},
                 }
             },
-            "nemo_fabric.agents.v1.captioner.skills",
+            "nemo_fabric.agents.v1.captioner.connectors",
             id="called-agent-member-not-declared",
         ),
         pytest.param(
@@ -347,7 +347,7 @@ def test_build_options_enables_skills_for_a_package_plugin(
 
 @pytest.mark.parametrize(
     "broken",
-    ["missing", "file", "no-manifest", "root-manifest-only"],
+    ["missing", "file", "no-manifest"],
 )
 def test_build_options_rejects_a_package_plugin_claude_cannot_read(
     agent_config: dict[str, Any],
@@ -361,8 +361,6 @@ def test_build_options_rejects_a_package_plugin_claude_cannot_read(
         plugin.write_text("not a folder", encoding="utf-8")
     elif broken != "missing":
         plugin.mkdir()
-    if broken == "root-manifest-only":
-        (plugin / "plugin.json").write_text('{"name": "remotion"}', encoding="utf-8")
     agent_config["extensions"][PLUGINS_KEY]["paths"].append(str(plugin))
 
     with pytest.raises(adapter.AdapterConfigError) as caught:
@@ -389,6 +387,129 @@ def test_build_options_passes_called_agents(
             prompt="Write captions in the language you are given.",
         ),
     }
+
+
+def test_build_options_loads_a_package_plugin_that_keeps_its_manifest_at_the_root(
+    agent_config: dict[str, Any],
+    build_options: Callable[..., ClaudeAgentOptions],
+    package: Path,
+):
+    # The layout an agent package gives a plugin: plugin.json, no .claude-plugin.
+    plugin = package / "plugins" / "review-kit"
+    (plugin / "skills" / "checklist").mkdir(parents=True)
+    (plugin / "plugin.json").write_text('{"name": "review-kit"}', encoding="utf-8")
+    (plugin / "skills" / "checklist" / "SKILL.md").write_text(
+        "---\nname: checklist\ndescription: Checks.\n---\nCheck.\n", encoding="utf-8"
+    )
+    agent_config["extensions"][PLUGINS_KEY]["paths"] = [str(plugin)]
+    agent_config["extensions"][AGENTS_KEY]["reviewer"]["plugins"] = {
+        "paths": [str(plugin)]
+    }
+
+    options = build_options()
+
+    staged = [Path(entry["path"]) for entry in options.plugins]
+    assert len(staged) == 2
+    for folder in staged:
+        assert folder != plugin
+        assert (folder / ".claude-plugin" / "plugin.json").read_text(
+            encoding="utf-8"
+        ) == '{"name": "review-kit"}'
+        assert (folder / "skills" / "checklist" / "SKILL.md").is_file()
+    assert options.agents["reviewer"].skills == ["review-kit:checklist"]
+    # The package's own folder is not written to.
+    assert not (plugin / ".claude-plugin").exists()
+
+
+def test_build_options_gives_a_called_agent_its_tools_skills_and_plugins(
+    agent_config: dict[str, Any],
+    build_options: Callable[..., ClaudeAgentOptions],
+    package: Path,
+    tmp_path: Path,
+):
+    skill = package / "agents" / "reviewer" / "skills" / "release-checklist"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: release-checklist\ndescription: Checks a release.\n---\nCheck it.\n",
+        encoding="utf-8",
+    )
+    plugin = package / "plugins" / "remotion"
+    (plugin / "skills" / "frames").mkdir(parents=True)
+    (plugin / "skills" / "frames" / "SKILL.md").write_text(
+        "---\nname: frames\ndescription: Counts frames.\n---\nCount.\n",
+        encoding="utf-8",
+    )
+    entry = agent_config["extensions"][AGENTS_KEY]["reviewer"]
+    entry["tools"] = ["read_file", "grep"]
+    entry["skills"] = {"paths": [str(skill)]}
+    entry["plugins"] = {"paths": [str(plugin)]}
+
+    options = build_options()
+
+    reviewer = options.agents["reviewer"]
+    assert reviewer.tools == ["Read", "Grep"]
+    assert reviewer.skills == [
+        "nemo-fabric-agent-reviewer:release-checklist",
+        "remotion:frames",
+    ]
+    # The other called agent gets none of them.
+    assert options.agents["captioner"].tools is None
+    assert options.agents["captioner"].skills is None
+    # The session loads the staged skills of the agent and the agent's plugin.
+    paths = [plugin_entry["path"] for plugin_entry in options.plugins]
+    staged = [path for path in paths if "agent-skills" in path]
+    assert len(staged) == 1
+    assert (Path(staged[0]) / "skills" / "release-checklist" / "SKILL.md").is_file()
+    assert str(plugin) in paths
+    assert options.skills == "all"
+
+
+def test_build_options_rejects_a_called_agents_tool_claude_has_no_name_for(
+    agent_config: dict[str, Any], build_options: Callable[..., ClaudeAgentOptions]
+):
+    agent_config["extensions"][AGENTS_KEY]["reviewer"]["tools"] = ["teleport"]
+
+    with pytest.raises(adapter.AdapterConfigError) as caught:
+        build_options()
+
+    assert caught.value.code == "claude_invalid_configuration"
+    assert "teleport" in caught.value.message
+
+
+def test_build_options_rejects_a_called_agents_skill_folder_without_a_skill(
+    agent_config: dict[str, Any],
+    build_options: Callable[..., ClaudeAgentOptions],
+    package: Path,
+):
+    empty = package / "agents" / "reviewer" / "skills" / "empty"
+    empty.mkdir(parents=True)
+    agent_config["extensions"][AGENTS_KEY]["reviewer"]["skills"] = {
+        "paths": [str(empty)]
+    }
+
+    with pytest.raises(adapter.AdapterConfigError) as caught:
+        build_options()
+
+    assert caught.value.code == "claude_invalid_configuration"
+    assert str(empty) in caught.value.message
+
+
+def test_build_options_rejects_a_called_agents_plugin_without_a_manifest(
+    agent_config: dict[str, Any],
+    build_options: Callable[..., ClaudeAgentOptions],
+    package: Path,
+):
+    plugin = package / "agents" / "reviewer" / "plugins" / "bare"
+    plugin.mkdir(parents=True)
+    agent_config["extensions"][AGENTS_KEY]["reviewer"]["plugins"] = {
+        "paths": [str(plugin)]
+    }
+
+    with pytest.raises(adapter.AdapterConfigError) as caught:
+        build_options()
+
+    assert caught.value.code == "claude_invalid_configuration"
+    assert str(plugin) in caught.value.message
 
 
 def test_build_options_passes_no_agents_without_called_agents(

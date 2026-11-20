@@ -165,7 +165,28 @@
             "properties": {
               "description": {"type": "string", "minLength": 1},
               "instructions": {"type": "string", "minLength": 1},
-              "max_turns": {"type": "integer", "minimum": 1}
+              "max_turns": {"type": "integer", "minimum": 1},
+              "tools": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+                "uniqueItems": true
+              },
+              "skills": {
+                "type": "object",
+                "properties": {
+                  "paths": {"type": "array", "items": {"type": "string", "minLength": 1}}
+                },
+                "required": ["paths"],
+                "additionalProperties": false
+              },
+              "plugins": {
+                "type": "object",
+                "properties": {
+                  "paths": {"type": "array", "items": {"type": "string", "minLength": 1}}
+                },
+                "required": ["paths"],
+                "additionalProperties": false
+              }
             },
             "required": ["description", "instructions"],
             "additionalProperties": false

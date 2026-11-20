@@ -235,7 +235,7 @@ The mapped configuration then holds the following keys. A configuration written 
 
 Planning rejects a key the selected adapter does not declare and a value that does not fit the adapter's schema. When the runtime starts, the adapter checks every plugin, hook, and called agent. A part the adapter cannot use fails the start with `claude_invalid_configuration` and names the part. The adapter never leaves one out silently.
 
-The adapter uses plugin folders and hook folders in place and does not copy them. The loader checks a package's files against its lock when it loads the package. A file that changes after the load is the file Claude Code reads or the adapter runs, so keep the package folder unchanged while the runtime lives.
+The adapter uses plugin folders and hook folders in place and does not copy them, with one exception: a plugin folder whose manifest is at `plugin.json`, the layout of an agent package, is copied under the artifact root with the manifest at `.claude-plugin/plugin.json`, where Claude Code reads it. The loader checks a package's files against its lock when it loads the package. A file that changes after the load is the file Claude Code reads or the adapter runs, so keep the package folder unchanged while the runtime lives.
 
 ### Plugins
 
@@ -324,7 +324,17 @@ Know these limits before you rely on a hook:
 
 ### Called Agents
 
-Each entry in `nemo_fabric.agents.v1` becomes one Claude subagent. The key is the agent's name. A name holds lowercase letters, digits, `_` and `-`, and does not start with `-`. That is the name rule of the package format, and the descriptor refuses any other name at planning. `description` tells Claude when to call the agent, `instructions` is the agent's prompt, and `max_turns` is its turn limit when set. The adapter passes nothing else that a called agent declares, such as a model, skills, or connectors of its own.
+Each entry in `nemo_fabric.agents.v1` becomes one Claude subagent. The key is the agent's name. A name holds lowercase letters, digits, `_` and `-`, and does not start with `-`. That is the name rule of the package format, and the descriptor refuses any other name at planning. `description` tells Claude when to call the agent, `instructions` is the agent's prompt, and `max_turns` is its turn limit when set.
+
+An entry can also carry `tools`, `skills`, and `plugins`:
+
+- `tools` lists the built-in tools the agent may use, by Claude's name. Claude gives the subagent those tools and no others.
+- `skills.paths` lists skill folders. The adapter copies them into a plugin of the session and names them on that subagent, so no other called agent lists them.
+- `plugins.paths` lists plugin folders. The session loads each plugin, and the subagent names the skills the plugin holds.
+
+The entry's schema does not take a model, a timeout, a connector or a hook: a Claude subagent runs on the model of the run, and the load report says `not_mapped` for each of these that a called agent declares.
+
+Claude Code lets only the main agent start a subagent, so a called agent cannot call another. The adapter does not count or limit how many run at one time.
 
 Claude starts a called agent with its `Agent` tool. When the configuration sets `tools.enabled`, list `Agent` there, or Claude cannot call any of them.
 

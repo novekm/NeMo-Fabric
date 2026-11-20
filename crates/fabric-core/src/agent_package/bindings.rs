@@ -519,7 +519,7 @@ mod tests {
             (
                 "agent:/agents/writer",
                 MappingGap::AdapterDoesNotAccept,
-                "the adapter's descriptor does not declare `nemo_fabric.agents.v1` under extension_schemas.agent_config",
+                "the harness cannot run a called agent as a subagent of its own, and NeMo Fabric runs none: the adapter's descriptor does not declare `nemo_fabric.agents.v1` under extension_schemas.agent_config",
             ),
         ] {
             let line = item(&report, id);
