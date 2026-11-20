@@ -75,6 +75,50 @@ async function fixture(t) {
   };
 }
 
+async function started(t, input) {
+  const session = await new StrandsAcpSessionFactory().create(input);
+  t.after(() => session.stop());
+  return JSON.parse(
+    await readFile(input.runtimeContext.environment.env.TEST_STRANDS_STATE, "utf8"),
+  );
+}
+
+test("loads one generated agent project and no longer passes the agent as flags", async (t) => {
+  const none = await fixture(t);
+  const first = await new StrandsAcpSessionFactory().create(none);
+  t.after(() => first.stop());
+  const noneState = JSON.parse(
+    await readFile(none.runtimeContext.environment.env.TEST_STRANDS_STATE, "utf8"),
+  );
+  assert.deepEqual(noneState.args.slice(0, 2), ["--acp-server", "--agent"]);
+  assert.ok(noneState.args[2].endsWith(join("project", "agent", "agent.ts")));
+  assert.equal(noneState.args.includes("--skills"), false);
+  assert.deepEqual(noneState.spec.lead.skills, []);
+
+  const input = await fixture(t);
+  const skill = join(input.baseDir, "skills", "review");
+  await mkdir(skill, { recursive: true });
+  await writeFile(join(skill, "SKILL.md"), "---\nname: review\ndescription: Review\n---\nReview.\n");
+  input.config.skills = { paths: ["skills/review"] };
+  const second = await new StrandsAcpSessionFactory().create(input);
+  t.after(() => second.stop());
+  const state = JSON.parse(
+    await readFile(input.runtimeContext.environment.env.TEST_STRANDS_STATE, "utf8"),
+  );
+  assert.equal(state.spec.lead.skills.length, 1);
+  assert.ok(state.spec.lead.skills[0].endsWith(join("skills", "review")));
+});
+
+test("refuses a skill path that holds no SKILL.md", async (t) => {
+  const input = await fixture(t);
+  await mkdir(join(input.baseDir, "empty"), { recursive: true });
+  input.config.skills = { paths: ["empty"] };
+  await assert.rejects(
+    new StrandsAcpSessionFactory().create(input),
+    (error) => error.code === "strands_skill_invalid",
+  );
+});
+
 test("preserves real ACP session history, isolates runtime state, and uses per-invocation usage", async (t) => {
   const input = await fixture(t);
   input.config.instructions = {
@@ -99,9 +143,9 @@ test("preserves real ACP session history, isolates runtime state, and uses per-i
   assert.equal(state.endpoint, "http://localhost:8000/v1");
   assert.equal(state.hasKey, true);
   assert.equal(state.unrelatedSecret, undefined);
-  assert.ok(state.args.includes("litellm/local"));
-  assert.ok(state.args.includes("--instructions=--instruction-text"));
-  assert.ok(state.args.includes("agentConfig.backgroundTasks=false"));
+  assert.equal(state.spec.lead.model, "litellm/local");
+  assert.equal(state.spec.lead.instructions, "--instruction-text");
+  assert.ok(state.agentSource.includes("backgroundTasks: false"));
   const scheduled = [];
   const originalSetTimeout = globalThis.setTimeout;
   const timer = t.mock.method(globalThis, "setTimeout", (callback, milliseconds, ...args) => {

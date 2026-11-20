@@ -124,6 +124,7 @@ SPDX-License-Identifier: Apache-2.0 -->
 ## Functions
 
 - [`capabilities.inspect_adapter`](./nemo_fabric.capabilities.md#function-inspect_adapter): Inspect supplied adapter and optional workflow metadata without loading its SDK.
+- [`agent_package.agent_package_start_facts`](./nemo_fabric.agent_package.md#function-agent_package_start_facts): The facts NeMo Fabric sends a checker URL about a package, without starting anything.
 - [`agent_package.fetch_agent_package`](./nemo_fabric.agent_package.md#function-fetch_agent_package): Fetch the content the lock of an agent package pins.
 - [`agent_package.fetch_agent_package_from_git`](./nemo_fabric.agent_package.md#function-fetch_agent_package_from_git): Fetch an agent package that is a folder in a git repository.
 - [`agent_package.load_agent_package`](./nemo_fabric.agent_package.md#function-load_agent_package): Read, check and map one agent package. Fetches nothing.

@@ -11,7 +11,7 @@ Use `nvidia.fabric.strands` to run the standard AWS Strands harness through NVID
 Install Node.js 22.19 or newer and the separately managed CLI:
 
 ```bash
-npm install --global @strands-agents/cli@0.2.1
+npm install --global @strands-agents/cli@0.4.0
 just install-typescript-strands
 npm run build --prefix adapter-contract/typescript
 npm run build --prefix adapters/typescript --workspace nemo-fabric-adapters-common
@@ -32,11 +32,15 @@ The code-review example enables only `read`. Select native tools for other appli
 
 The adapter supports text invocations, invocation-local token usage, deadline cleanup, and independent runtimes.
 
+## Run an Agent Package
+
+The adapter runs the CLI on a small agent project it writes for each runtime (`strands --acp-server --agent <project>/agent/agent.ts`). With `Fabric.start_agent_package`, a package's instructions, skills, connectors and tool list land in the Strands agent, and each called agent becomes a Strands agent of its own, with its own instructions, tools, skills, MCP servers and model, that the lead calls as a tool. A called agent's `max_turns` is enforced by a handler on that agent. A Cedar file named in `harness.settings.cedar_policy` is checked before every tool call of every agent, and `harness.settings.nemo_guardrails` sends each tool call to a NeMo Guardrails hooks server, which denies a call it does not allow. Plugins, hooks, `timeout_seconds`, `max_parallel` and token limits have no place in Strands and are reported as `not_mapped`. The [adapter guide](https://github.com/NVIDIA/NeMo-Fabric/blob/main/adapters/typescript/strands/README.md#what-an-agent-package-becomes) lists every part.
+
 ## Limitations
 
 Strands CLI 0.2.1 reports zero cache counters even when the provider did not report them. The adapter omits these ambiguous zero cache counts and preserves positive counts and inclusive input/output totals. Genuine zero cache counts cannot be distinguished from missing counts.
 
-The adapter does not advertise custom source agents, native streaming, public cancellation, services, Relay telemetry, or normalized skills and tool policy.
+The adapter does not advertise native streaming, public cancellation, services, Relay telemetry, or package plugins and hooks. It loads only the agent project it writes, never an agent source file the caller supplies.
 
 See the [Strands adapter guide](https://github.com/NVIDIA/NeMo-Fabric/blob/main/adapters/typescript/strands/README.md) for complete configuration, endpoint mapping, MCP restrictions, lifecycle behavior, and live E2E commands.
 

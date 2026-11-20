@@ -4,7 +4,8 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
   agent,
@@ -25,6 +26,17 @@ if (process.env.TEST_STRANDS_DESCENDANT_STATE) {
   const [pid] = await once(child, "message");
   await writeFile(process.env.TEST_STRANDS_DESCENDANT_STATE, JSON.stringify({ pid }));
 }
+let project = {};
+const agentArg = process.argv.indexOf("--agent");
+if (agentArg !== -1) {
+  const root = dirname(dirname(process.argv[agentArg + 1]));
+  const read = (name) => readFile(join(root, name), "utf8").catch(() => undefined);
+  project = {
+    spec: JSON.parse(await read("spec.json")),
+    policy: await read("policy.cedar"),
+    agentSource: await read("agent/agent.ts"),
+  };
+}
 if (process.env.TEST_STRANDS_STATE) {
   await writeFile(
     process.env.TEST_STRANDS_STATE,
@@ -35,6 +47,7 @@ if (process.env.TEST_STRANDS_STATE) {
       endpoint: process.env.LITELLM_BASE_URL,
       hasKey: Boolean(process.env.LITELLM_API_KEY),
       unrelatedSecret: process.env.TEST_UNRELATED_SECRET,
+      ...project,
     }),
   );
 }

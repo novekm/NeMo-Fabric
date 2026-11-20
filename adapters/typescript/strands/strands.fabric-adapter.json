@@ -17,7 +17,11 @@
       "models",
       "mcp",
       "instructions.system",
-      "models.base_url"
+      "skills",
+      "models.base_url",
+      "tools.enabled",
+      "tools.blocked",
+      "runtime.max_turns"
     ],
     "system_instruction_modes": [
       "append"
@@ -51,6 +55,37 @@
           "type": "string",
           "minLength": 1
         }
+      },
+      "cedar_policy": {
+        "type": "string",
+        "minLength": 1
+      },
+      "nemo_guardrails": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "pattern": "^https?://"
+          },
+          "agent_name": {
+            "type": "string"
+          },
+          "agent_digest": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "trace_file": {
+        "type": "string",
+        "minLength": 1
       }
     },
     "additionalProperties": false
@@ -106,6 +141,139 @@
     ]
   },
   "extension_schemas": {
+    "agent_config": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "nemo_fabric.tools.v1": {
+          "type": "object",
+          "properties": {
+            "builtin": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "read_file",
+                  "write_file",
+                  "edit_file",
+                  "shell",
+                  "web_fetch",
+                  "web_search"
+                ]
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "builtin"
+          ],
+          "additionalProperties": false
+        },
+        "nemo_fabric.agents.v1": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z0-9_][a-z0-9_-]*$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string",
+                "minLength": 1
+              },
+              "instructions": {
+                "type": "string",
+                "minLength": 1
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "read_file",
+                    "write_file",
+                    "edit_file",
+                    "shell",
+                    "web_fetch",
+                    "web_search"
+                  ]
+                },
+                "uniqueItems": true
+              },
+              "model": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "const": "bedrock"
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "provider",
+                  "model"
+                ],
+                "additionalProperties": false
+              },
+              "mcp": {
+                "type": "object",
+                "properties": {
+                  "servers": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "servers"
+                ],
+                "additionalProperties": false
+              },
+              "skills": {
+                "type": "object",
+                "properties": {
+                  "paths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "paths"
+                ],
+                "additionalProperties": false
+              },
+              "plugins": {
+                "type": "object",
+                "properties": {
+                  "paths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "paths"
+                ],
+                "additionalProperties": false
+              },
+              "max_turns": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "description",
+              "instructions"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "run_error": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -194,7 +362,11 @@
     }
   },
   "capabilities": {
-    "metadata": {"health_checks": ["live"]},
+    "metadata": {
+      "health_checks": [
+        "live"
+      ]
+    },
     "streaming": false,
     "cancellation": false,
     "updates": false,

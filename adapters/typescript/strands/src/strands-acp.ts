@@ -26,9 +26,11 @@ import {
   selectMcpServers,
   selectModel,
   selectSettings,
+  skillPaths,
   systemInstructions,
   workspacePath,
 } from "./configuration.js";
+import { buildSpec, cedarText, writeProject } from "./project.js";
 
 export interface StrandsPromptOutcome {
   text: string;
@@ -268,6 +270,7 @@ export class StrandsAcpSessionFactory implements StrandsSessionFactory {
     const settings = selectSettings(input.config);
     const model = selectModel(input.config, settings);
     const instructions = systemInstructions(input.config);
+    const skills = await skillPaths(input);
     const configured = input.runtimeContext.environment.env ?? {};
     const mcpServers = selectMcpServers(input.config, configured, process.env);
     const environment = childEnvironment(input);
@@ -318,27 +321,32 @@ export class StrandsAcpSessionFactory implements StrandsSessionFactory {
         { mode: 0o600 },
       );
       const executable = await command(environment);
+      const spec = await buildSpec(input, {
+        name: input.agentName,
+        instructions,
+        model: model?.name,
+        builtinTools: settings.builtinTools,
+        skills,
+        guardrails: settings.guardrails,
+        trace: settings.traceFile,
+      });
+      const cedar = await cedarText(
+        input.config,
+        input.baseDir,
+        settings.cedarPolicy,
+      );
+      const agentPath = await writeProject(
+        join(home, "project"),
+        spec,
+        cedar,
+      );
       const session = await startAcpSession({
         command: executable.command,
         args: [
           ...executable.args,
           "--acp-server",
-          "--set",
-          "agentConfig.backgroundTasks=false",
-          "--session",
-          "off",
-          "--memory",
-          "off",
-          "--skills",
-          "off",
-          "--builtin-plugins",
-          "environment",
-          "--builtin-tools",
-          settings.builtinTools.join(","),
-          ...(model === undefined ? [] : ["--model", model.name]),
-          ...(instructions === undefined
-            ? []
-            : [`--instructions=${instructions}`]),
+          "--agent",
+          agentPath,
         ],
         cwd: workspace,
         env: environment,

@@ -4132,7 +4132,11 @@
             "models",
             "mcp",
             "instructions.system",
-            "models.base_url"
+            "skills",
+            "models.base_url",
+            "tools.enabled",
+            "tools.blocked",
+            "runtime.max_turns"
           ],
           "system_instruction_modes": [
             "append"
@@ -4140,6 +4144,139 @@
         },
         "contract_version": "fabric.adapter/v1alpha2",
         "extension_schemas": {
+          "agent_config": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
+            "properties": {
+              "nemo_fabric.agents.v1": {
+                "additionalProperties": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "description": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "instructions": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "max_turns": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "mcp": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "servers": {
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "servers"
+                      ],
+                      "type": "object"
+                    },
+                    "model": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "model": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "provider": {
+                          "const": "bedrock"
+                        }
+                      },
+                      "required": [
+                        "provider",
+                        "model"
+                      ],
+                      "type": "object"
+                    },
+                    "plugins": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "paths": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "paths"
+                      ],
+                      "type": "object"
+                    },
+                    "skills": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "paths": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "paths"
+                      ],
+                      "type": "object"
+                    },
+                    "tools": {
+                      "items": {
+                        "enum": [
+                          "read_file",
+                          "write_file",
+                          "edit_file",
+                          "shell",
+                          "web_fetch",
+                          "web_search"
+                        ]
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "description",
+                    "instructions"
+                  ],
+                  "type": "object"
+                },
+                "propertyNames": {
+                  "pattern": "^[a-z0-9_][a-z0-9_-]*$"
+                },
+                "type": "object"
+              },
+              "nemo_fabric.tools.v1": {
+                "additionalProperties": false,
+                "properties": {
+                  "builtin": {
+                    "items": {
+                      "enum": [
+                        "read_file",
+                        "write_file",
+                        "edit_file",
+                        "shell",
+                        "web_fetch",
+                        "web_search"
+                      ]
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "builtin"
+                ],
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
           "run_error": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "additionalProperties": false,
@@ -4303,6 +4440,10 @@
               "type": "array",
               "uniqueItems": true
             },
+            "cedar_policy": {
+              "minLength": 1,
+              "type": "string"
+            },
             "insecure_http_model_hosts": {
               "items": {
                 "minLength": 1,
@@ -4315,6 +4456,33 @@
               "maximum": 10000,
               "minimum": 1,
               "type": "integer"
+            },
+            "nemo_guardrails": {
+              "additionalProperties": false,
+              "properties": {
+                "agent_digest": {
+                  "type": "string"
+                },
+                "agent_name": {
+                  "type": "string"
+                },
+                "timeout_seconds": {
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "url": {
+                  "pattern": "^https?://",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "type": "object"
+            },
+            "trace_file": {
+              "minLength": 1,
+              "type": "string"
             }
           },
           "type": "object"
@@ -4325,7 +4493,7 @@
         "name": "nemo-fabric-adapters-strands",
         "version": "0.7.0"
       },
-      "sha256": "3b6e7f1dec2fc416c30c00e24225b21a161160252b6aba3846028319478ca3c9",
+      "sha256": "c47cbbbdf39499f9066b1434a7c679be6cd95fc3a9310e7e9eb68a5f168be3b3",
       "source": "adapters/typescript/strands/strands.fabric-adapter.json"
     }
   },

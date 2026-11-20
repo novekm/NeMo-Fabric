@@ -16,14 +16,14 @@ flowchart LR
     CLI --> Tools
 ```
 
-This adapter targets the standard harness. Loading arbitrary Python or TypeScript SDK agents through `--agent` requires a separate integration: the CLI's source-agent paths have different construction, MCP, permission, and usage behavior.
+The adapter starts the CLI with `strands --acp-server --agent <project>/agent/agent.ts`. The project is a small agent project the adapter writes into the runtime's isolated home for each runtime and removes when the runtime stops. It is the only place a Strands agent can carry what the CLI flags cannot say: a called agent with its own instructions, tools, skills and MCP servers, a Cedar authorization policy, and a turn limit. The source files are static; every value from the configuration or from an agent package goes into one `spec.json` and is never spliced into source text. The adapter never loads agent source it did not write.
 
 ## Install
 
-Use Node.js 22.19 or newer. Install the harness separately; it is not a dependency of the adapter. The tested CLI release is 0.2.1.
+Use Node.js 22.19 or newer. Install the harness separately; it is not a dependency of the adapter. The tested CLI releases are 0.2.1 and 0.4.0.
 
 ```bash
-npm install --global @strands-agents/cli@0.2.1
+npm install --global @strands-agents/cli@0.4.0
 ```
 
 For a source checkout, run from the repository root:
@@ -101,6 +101,10 @@ Query the endpoint's model catalog for its served ID. Strands does not provide a
 | `max_invocations` | `100` | Maximum dispatched invocations in one conversation, from 1 to 10,000. Start a new runtime when exhausted; history is not silently reset. |
 | `insecure_http_model_hosts` | `[]` | Explicit hostnames or IPs allowed for HTTP model endpoints outside loopback. |
 
+Skills come from NeMo Fabric's normalized `skills.paths`. Each path is one skill folder that holds `SKILL.md`, and the adapter passes them to the CLI as `--skills`. With no paths, skills are off and the CLI's own skill discovery stays disabled. A path that is missing or holds no `SKILL.md` fails startup with `strands_skill_invalid`.
+
+Called agents, plugins, hooks and a turn limit have no equivalent in this adapter. The CLI has a generic `subagent` delegate, not a named agent with its own instructions, tools and model, so an agent package's called agents are not mapped. The load report names them `not_mapped`.
+
 The standard Strands ACP server executes enabled tools with the task environment's permissions. There is no adapter permission mode or normalized tool-policy support. Tool selection is not an operating-system sandbox; use an appropriate NeMo Fabric environment when running untrusted tasks.
 
 Configure MCP through NeMo Fabric's normalized `mcp.servers`, not harness settings:
@@ -159,3 +163,34 @@ Refer to the [SDK health-check overview](../../../docs/sdk/health-checks.mdx) fo
 Strands prompt deadlines and already-expired invocation deadlines use canonical error code `timeout`. Error metadata retains `owner: "adapter"` and the native cause (`strands_prompt_timeout` or `strands_deadline_exceeded`), plus the enforced timeout in seconds or the absolute `deadline_millis`. Prompt expiration invalidates the session and attempts process cleanup. Startup and transport failures keep their existing error classifications.
 
 When `runtime.timeout_seconds` is omitted or null, NeMo Fabric does not impose a total prompt deadline. An explicit invocation deadline is forwarded to the ACP session; startup and shutdown remain separately bounded.
+
+## What an Agent Package Becomes
+
+`Fabric.start_agent_package` maps an [agent package](../../../docs/sdk/agent-packages.mdx) onto this adapter. Each row names where the part lands in the generated Strands agent, or says that Strands has no place for it; the load report names every part the same way.
+
+| Package part | In Strands | Maps |
+| --- | --- | --- |
+| instructions | `instructions`, appended to the harness system prompt | yes |
+| model | `model` as `bedrock/<id>` or the LiteLLM profile (the config binds it; the package never does) | yes |
+| skills | `skills`, one folder per skill | yes |
+| connectors | `mcpServers` of the agent | yes |
+| the agent's `tools` | `builtinTools` as an exact list (`read_file`, `write_file`, `edit_file`, `shell`, `web_fetch`, `web_search`); a package with called agents and no tool list gives its agent none | yes |
+| called agents | one harness agent each, handed to the lead as a tool named for the agent, with its own instructions, tools, skills, plugin skills, MCP servers and model | yes |
+| a called agent's `max_turns` and the agent's own | a handler that denies the model call after N per invocation | yes |
+| `tools.blocked` of the config | removed from `builtinTools` and forbidden in a Cedar policy | yes |
+| `max_depth` | a called agent has no tool to call another agent | by construction |
+| a tool policy | the operator's Cedar file, `harness.settings.cedar_policy`, checked before every tool call of every agent | yes |
+| NeMo Guardrails | `harness.settings.nemo_guardrails`: each tool call is sent to the hooks server; a call it does not allow, or a server that does not answer, is denied | yes |
+| plugins, hooks | none: Strands has no package plugin or command-hook format | no |
+| a called agent's `timeout_seconds`, `max_parallel`, policies | none | no |
+| `max_total_tokens` and other token limits | none per agent: the SDK takes token limits per call, not per agent | no |
+
+`harness.settings.trace_file` names a file that gets one JSON line for each model call and tool call of every agent, with the agent's name: the record of which called agent ran, which skill it loaded and which call a policy refused.
+
+Cedar names an action by the Strands tool name (`read`, `shell`, `write`, `edit`, `web_fetch`, `web_search`) and a tool's arguments as `context.input`:
+
+```cedar
+forbid(principal, action == Action::"read", resource) when { context.input.path like "*secret*" };
+```
+
+The adapter adds `permit(principal, action, resource);` first, so a policy file lists only what it forbids.

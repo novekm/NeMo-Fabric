@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { realpath, stat } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 import type { AgentConfig } from "nemo-fabric-adapter-contract";
 import {
@@ -17,6 +17,14 @@ export interface StrandsSettings {
   builtinTools: string[];
   maxInvocations: number;
   insecureHosts: string[];
+  cedarPolicy?: string;
+  traceFile?: string;
+  guardrails?: {
+    url: string;
+    agent_name?: string;
+    agent_digest?: string;
+    timeout_seconds?: number;
+  };
 }
 
 const ENV_REFERENCE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/gu;
@@ -37,6 +45,9 @@ export function selectSettings(config: AgentConfig): StrandsSettings {
           "builtin_tools",
           "max_invocations",
           "insecure_http_model_hosts",
+          "cedar_policy",
+          "nemo_guardrails",
+          "trace_file",
         ].includes(name),
     )
   ) {
@@ -62,10 +73,45 @@ export function selectSettings(config: AgentConfig): StrandsSettings {
       "Strands harness settings are invalid",
     );
   }
+  const cedar = settings.cedar_policy;
+  if (cedar !== undefined && (typeof cedar !== "string" || cedar.length === 0)) {
+    throw new LifecycleError(
+      "strands_settings_invalid",
+      "Strands harness settings are invalid",
+    );
+  }
+  const trace = settings.trace_file;
+  if (trace !== undefined && (typeof trace !== "string" || !isAbsolute(trace))) {
+    throw new LifecycleError(
+      "strands_settings_invalid",
+      "Strands harness settings are invalid",
+    );
+  }
+  const guardrails = settings.nemo_guardrails;
+  if (
+    guardrails !== undefined &&
+    (!isRecord(guardrails) ||
+      typeof guardrails.url !== "string" ||
+      !/^https?:\/\//u.test(guardrails.url) ||
+      Object.keys(guardrails).some(
+        (name) =>
+          !["url", "agent_name", "agent_digest", "timeout_seconds"].includes(name),
+      ))
+  ) {
+    throw new LifecycleError(
+      "strands_settings_invalid",
+      "Strands harness settings are invalid",
+    );
+  }
   return {
     builtinTools: tools as string[],
     maxInvocations: Number(max),
     insecureHosts: insecureHttpModelHosts(settings, "strands_settings_invalid"),
+    ...(cedar === undefined ? {} : { cedarPolicy: cedar }),
+    ...(trace === undefined ? {} : { traceFile: trace }),
+    ...(guardrails === undefined
+      ? {}
+      : { guardrails: guardrails as StrandsSettings["guardrails"] }),
   };
 }
 
@@ -149,6 +195,29 @@ export function systemInstructions(config: AgentConfig): string | undefined {
     );
   }
   return instruction.content;
+}
+
+/**
+ * Absolute skill folders for `--skills`: each configured path is one skill folder
+ * (it holds SKILL.md). A path that does not exist or holds no SKILL.md fails the start.
+ */
+export async function skillPaths(input: AdapterStartInput): Promise<string[]> {
+  const paths = input.config.skills?.paths ?? [];
+  const resolved: string[] = [];
+  for (const entry of paths) {
+    try {
+      const folder = await realpath(resolve(input.baseDir, entry));
+      if (!(await stat(join(folder, "SKILL.md"))).isFile())
+        throw new Error("no SKILL.md");
+      resolved.push(folder);
+    } catch {
+      throw new LifecycleError(
+        "strands_skill_invalid",
+        "A configured NeMo Fabric skill path must be a folder that holds SKILL.md",
+      );
+    }
+  }
+  return resolved;
 }
 
 export async function workspacePath(input: AdapterStartInput): Promise<string> {
